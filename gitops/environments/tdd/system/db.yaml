@@ -1,0 +1,166 @@
+# SQL Server of the environment: one container with its own disk. The passwords are in Secret db-credentials, which
+# step "Prepare environment" creates once (they never reach Git); step "Initialize database" creates the database and
+# the app's login. Service db-localhost has the same endpoints under a name that contains "localhost": the app's
+# migration tool validates the server certificate of every other name, and SQL Server's own certificate is self-signed.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: db
+  labels:
+    app.kubernetes.io/name: db
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: db
+  ports:
+    - name: tds
+      port: 1433
+      targetPort: tds
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: db-localhost
+  labels:
+    app.kubernetes.io/name: db
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: db
+  ports:
+    - name: tds
+      port: 1433
+      targetPort: tds
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: db-hl
+  labels:
+    app.kubernetes.io/name: db
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: db
+  ports:
+    - name: tds
+      port: 1433
+      targetPort: tds
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: db
+  labels:
+    app.kubernetes.io/name: db
+spec:
+  serviceName: db-hl
+  replicas: 1
+  revisionHistoryLimit: 3
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: db
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: db
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mssql
+          image: mcr.microsoft.com/mssql/server:2022-CU27-ubuntu-22.04
+          env:
+            - name: ACCEPT_EULA
+              value: "Y"
+            - name: MSSQL_PID
+              value: "Express"
+            - name: MSSQL_MEMORY_LIMIT_MB
+              value: "2048"
+            - name: MSSQL_SA_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: sa-password
+          ports:
+            - name: tds
+              containerPort: 1433
+              protocol: TCP
+          startupProbe:
+            exec:
+              command:
+                - /bin/bash
+                - -c
+                - SQLCMDPASSWORD="$(cat /etc/db-credentials/sa-password)" /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -C -l 5 -b -Q "SELECT 1" >/dev/null
+            periodSeconds: 10
+            timeoutSeconds: 8
+            failureThreshold: 60
+          readinessProbe:
+            exec:
+              command:
+                - /bin/bash
+                - -c
+                - SQLCMDPASSWORD="$(cat /etc/db-credentials/sa-password)" /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -C -l 5 -b -Q "SELECT 1" >/dev/null
+            periodSeconds: 15
+            timeoutSeconds: 8
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: tds
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 250m
+              memory: 2Gi
+            limits:
+              memory: 2560Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+              # Without it the pinned image cannot start sqlservr as a non-root user.
+              add:
+                - NET_BIND_SERVICE
+          volumeMounts:
+            - name: data
+              mountPath: /var/opt/mssql
+            - name: credentials
+              mountPath: /etc/db-credentials
+              readOnly: true
+      volumes:
+        - name: credentials
+          secret:
+            secretName: db-credentials
+            defaultMode: 288  # 0440: owner and group read
+            items:
+              - key: sa-password
+                path: sa-password
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: managed-csi
+        resources:
+          requests:
+            storage: 8Gi
