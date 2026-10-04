@@ -1,0 +1,46 @@
+@startuml 04a-app-in-tdd
+!include _c4.iuml
+title Clear Measure work orders demo 3 (AKS and Argo CD) | Phase 4a: app 2.4.1 running in tdd (2026-10-04)
+
+Person(viewer, "Class audience", "Browser")
+
+Boundary(gh, "GitHub org clearmeasure-aisf-sample-apps") {
+  Container(apprepo, "cmdemo3-workorders", "app repository", "Build, then Release, for every green master")
+  Container(sysrepo, "cmdemo3-system", "system repository", "gitops/environments/tdd/ui/kustomization.yaml: newTag 2.4.1 (commit d3a4920)", $tags="new")
+}
+
+Boundary(octo, "Octopus space cmdemo3 demo") {
+  ContainerDb(feed, "Built-in feed", "Octopus packages", "ChurchBulletin.Database and AcceptanceTests 2.4.1", $tags="new")
+  Container(acrfeed, "Feed acr-cmdemo3", "container feed, OIDC", "cmdemo3/ui:2.4.1", $tags="new")
+  Container(rel_app, "cmdemo3-ui 2.4.1", "release", "Deployed to tdd", $tags="new")
+  Container(instance, "Argo CD instance argocd-cmdemo3", "gateway", "Sync and health of the Applications")
+}
+
+Boundary(rgn, "rg-cmdemo3-nonprod") {
+  ContainerDb(acr, "acrcmdemo3q3zmsi", "Container Registry", "cmdemo3/ui:2.4.1", $tags="new")
+}
+
+Boundary(aksb, "aks-cmdemo3 in rg-cmdemo3-cluster") {
+  Container(argocd, "Argo CD", "namespace argocd", "Application cmdemo3-ui-tdd")
+  Container(k8sworker, "Octopus Kubernetes worker", "namespace octopus-worker", "Runs the script steps", $tags="new")
+  Boundary(ns, "Namespace cmdemo3-tdd") {
+    Container(app, "ui", "Deployment", "Image 2.4.1; https://cmdemo3-tdd.20-225-155-175.sslip.io/_healthcheck answers 200", $tags="new")
+    ContainerDb(sql, "db", "SQL Server 2022 Express", "Database cmdemo3, schema migrated to 2.4.1", $tags="new")
+  }
+}
+
+Rel(apprepo, acr, "Release: push image", "OIDC as id-cmdemo3-acr-push", $tags="new")
+Rel(apprepo, feed, "Release: push database and test packages", "OIDC", $tags="new")
+Rel(apprepo, rel_app, "Release: create release", "OIDC", $tags="new")
+Rel(rel_app, k8sworker, "1. Migrate database; 3. Verify deployable; 4. Acceptance tests", $tags="new")
+Rel(k8sworker, sql, "migrations, test data", "sa and app logins from Secret db-credentials", $tags="new")
+Rel(rel_app, sysrepo, "2. Update deployable: commits newTag", "Update Argo CD Application Image Tags", $tags="new")
+Rel(rel_app, instance, "2. triggers the sync, waits for healthy", $tags="new")
+Rel(argocd, sysrepo, "reads the commit", $tags="new")
+Rel(argocd, app, "rolls the Deployment", $tags="new")
+Rel(app, acr, "pull image", "id-cmdemo3-kubelet", $tags="new")
+Rel(app, sql, "SQL connection")
+Rel(viewer, app, "HTTPS through the ingress")
+
+SHOW_LEGEND()
+@enduml
