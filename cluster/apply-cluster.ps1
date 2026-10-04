@@ -65,7 +65,8 @@ az stack group create --name "stack-$slug-cluster" --resource-group $resourceGro
     --template-file (Join-Path $Root 'infra' 'cluster.bicep') `
     --action-on-unmanage detachAll --deny-settings-mode none --yes --output none
 $env:KUBECONFIG = Join-Path ([IO.Path]::GetTempPath()) "kubeconfig-$slug"
-az aks get-credentials --resource-group $resourceGroup --name $clusterName --admin --overwrite-existing --file $env:KUBECONFIG --output none
+# --only-show-errors: the CLI reports the merged context as a WARNING line.
+az aks get-credentials --resource-group $resourceGroup --name $clusterName --admin --overwrite-existing --file $env:KUBECONFIG --only-show-errors --output none
 kubectl wait --for=condition=Ready nodes --all --timeout=600s
 Write-Host "PASS cluster $clusterName"
 
@@ -77,15 +78,17 @@ Write-Host "PASS Argo CD (chart $argoChartVersion) and the root Application"
 
 Write-Host "==> Octopus Argo CD Gateway $gatewayName"
 if (Test-HelmRelease -Name $gatewayName -Namespace $gatewayNamespace) {
-    # Registered before. The environments of the instance follow system.json.
-    $gateways = Invoke-RestMethod -Uri "$octopusUrl/api/$spaceId/argocdgateways?take=100" -Headers $headers
-    $gateway = @($gateways.Items | Where-Object { $_.Name -eq $gatewayName })[0]
-    if (-not $gateway) { throw "The gateway's Helm release exists, but Octopus lists no Argo CD gateway named $gatewayName in $spaceId." }
-    $wanted = @((Invoke-RestMethod -Uri "$octopusUrl/api/$spaceId/environments/all" -Headers $headers) | Where-Object { $environments -contains $_.Slug } | ForEach-Object { $_.Id } | Sort-Object)
-    $current = @($gateway.EnvironmentIds | Sort-Object)
-    if (($wanted -join ',') -ne ($current -join ',')) {
-        $gateway.EnvironmentIds = $wanted
-        Invoke-RestMethod -Uri "$octopusUrl/api/$spaceId/argocdgateways/$($gateway.Id)" -Method Put -Headers $headers -ContentType 'application/json' -Body ($gateway | ConvertTo-Json -Depth 20) | Out-Null
+    # Registered before. The environments of the instance follow system.json (a new environment is a pull request
+    # that adds it there). The provider has no resource for the instance, so this is the REST API: the instances are
+    # listed as summaries, and a POST to the gateway changes it.
+    $gateway = @((Invoke-RestMethod -Uri "$octopusUrl/api/$spaceId/argocdinstances/summaries" -Headers $headers).Resources | Where-Object { $_.Name -eq $gatewayName })[0]
+    if (-not $gateway) { throw "The gateway's Helm release exists, but Octopus lists no Argo CD instance named $gatewayName in $spaceId." }
+    $wanted = @((Invoke-RestMethod -Uri "$octopusUrl/api/$spaceId/environments/all" -Headers $headers) | Where-Object { $environments -contains $_.Slug } | ForEach-Object { [string] $_.Id } | Sort-Object)
+    if (($wanted -join ',') -ne ((@($gateway.EnvironmentIds) | Sort-Object) -join ',')) {
+        $body = @{ Id = $gateway.GatewayId; SpaceId = $spaceId; Name = $gatewayName; WebUIUri = $gateway.WebUIUri; EnvironmentIds = $wanted; TenantIds = @($gateway.TenantIds) } | ConvertTo-Json -Depth 5
+        Invoke-RestMethod -Uri "$octopusUrl/api/$spaceId/argocdgateways/$($gateway.GatewayId)" -Method Post -Headers $headers -ContentType 'application/json' -Body $body | Out-Null
+        $after = @((Invoke-RestMethod -Uri "$octopusUrl/api/$spaceId/argocdgateways/$($gateway.GatewayId)" -Headers $headers).Resource.EnvironmentIds | Sort-Object)
+        if (($wanted -join ',') -ne ($after -join ',')) { throw "Octopus did not take the environments $($environments -join ', ') for the Argo CD instance $gatewayName (it lists $($after -join ', '))." }
         Write-Host "PASS gateway $gatewayName now serves $($environments -join ', ')"
     }
     else {
