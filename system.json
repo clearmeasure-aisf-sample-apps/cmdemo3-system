@@ -128,6 +128,11 @@
       "name": "uat",
       "tier": "nonprod",
       "appCpu": "0.5"
+    },
+    {
+      "name": "prod",
+      "tier": "prod",
+      "appCpu": "0.5"
     }
   ],
   "cluster": {
