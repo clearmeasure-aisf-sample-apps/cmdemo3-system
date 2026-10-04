@@ -1,0 +1,46 @@
+@startuml 04-app-repository
+!include _c4.iuml
+title Clear Measure work orders demo 3 (AKS and Argo CD) | Phase 4: app repository pushed (2026-10-04)
+
+Boundary(box, "Operator machine omarchy") {
+  Container(aiops, "Linux user aiops", "gh as cm-ai-ops-bot", "Ran new-app-repository.ps1")
+}
+
+Boundary(upstream, "GitHub ClearMeasureLabs") {
+  Container(bootcamp, "bootcamp-palermo-workorders", "upstream, read only", "ClearMeasureLabs/bootcamp-palermo-workorders@97e252cbff8edd40cebb0a3e46c169ed332c2516")
+}
+
+Boundary(gh, "GitHub org clearmeasure-aisf-sample-apps") {
+  Container(apprepo, "cmdemo3-workorders", "public repository, master protected by ruleset (Build result)", "Snapshot without history; deploy.yml, .octopus/ and the publish jobs removed", $tags="new")
+  Container(wf_build, "Workflow Build", "GitHub Actions, build.yml", "Unit and integration tests, packages MAJOR.MINOR.<run>", $tags="new")
+  Container(wf_release, "Workflow Release", "GitHub Actions, release.yml, environment release", "After a green Build of master", $tags="new")
+  Container(sysrepo, "cmdemo3-system", "system repository", "gitops/environments/tdd/ui: the image tag")
+  Container(board, "Project board", "GitHub Project", "Both repositories linked")
+}
+
+Boundary(octo, "Octopus space cmdemo3 demo") {
+  Container(sa, "cmdemo3-github", "service account", "OIDC identity for cmdemo3-workorders, environment release (immutable subject)", $tags="new")
+  Container(feed, "Feed acr-cmdemo3", "container feed, OIDC as id-cmdemo3-feed", "Image versions of cmdemo3/ui")
+  Container(proj_app, "cmdemo3-ui", "project", "Migrate database, Update deployable (Update Argo CD Application Image Tags), Verify deployable, Acceptance tests")
+}
+
+Boundary(sub, "Subscription Jeffrey MVP Azure subscription 7-25--7-27") {
+  Container(id_push, "id-cmdemo3-acr-push", "managed identity", "Federated credential for cmdemo3-workorders, environment release (immutable subject)", $tags="new")
+  ContainerDb(acr, "acrcmdemo3q3zmsi", "Container Registry")
+  Container(app, "ui in namespace cmdemo3-tdd", "Deployment in aks-cmdemo3", "Placeholder image")
+}
+
+Rel(aiops, bootcamp, "snapshot", "git clone --depth 1", $tags="new")
+Rel(aiops, apprepo, "creates, pushes master; variables, environment release", $tags="new")
+Rel(apprepo, wf_build, "push to master", $tags="new")
+Rel(wf_build, wf_release, "workflow_run: completed", $tags="new")
+Rel(wf_release, id_push, "azure/login", "OIDC", $tags="planned")
+Rel(id_push, acr, "push image", $tags="planned")
+Rel(wf_release, sa, "OctopusDeploy/login", "OIDC", $tags="planned")
+Rel(sa, proj_app, "release <version>", $tags="planned")
+Rel(feed, acr, "reads versions")
+Rel(proj_app, sysrepo, "commits the image tag", $tags="planned")
+Rel(sysrepo, app, "Argo CD rolls the Deployment", $tags="planned")
+
+SHOW_LEGEND()
+@enduml
