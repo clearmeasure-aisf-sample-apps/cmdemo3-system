@@ -76,6 +76,8 @@ resource "octopusdeploy_process_step" "system_apply" {
       default_branch      = "main"
       git_credential_type = "Library"
       git_credential_id   = octopusdeploy_git_credential.system.id
+      # Provider 1.20.0 reads an unset connection back as "" and then reports an inconsistent result.
+      github_connection_id = ""
     }
   }
 
