@@ -45,7 +45,7 @@ jobs:
               Write-Host "PASS $([IO.Path]::GetRelativePath($PWD, $pin.DirectoryName))"
           }
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: "1.16.4"
           terraform_wrapper: false

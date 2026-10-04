@@ -52,7 +52,7 @@ jobs:
           server: ${{ vars.OCTOPUS_URL }}
           service_account_id: ${{ vars.OCTOPUS_SERVICE_ACCOUNT_ID }}
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: "1.16.4"
           terraform_wrapper: false
@@ -82,7 +82,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6.0.1
 
-      - uses: azure/login@v2
+      - uses: azure/login@v3
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID_CLUSTER }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
