@@ -100,6 +100,21 @@ spec:
           selector:
             matchLabels:
               kubernetes.io/metadata.name: cmdemo3-uat
+    - name: https-prod
+      protocol: HTTPS
+      port: 443
+      hostname: cmdemo3-prod.20-225-155-175.sslip.io
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: tls-prod
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: cmdemo3-prod
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
