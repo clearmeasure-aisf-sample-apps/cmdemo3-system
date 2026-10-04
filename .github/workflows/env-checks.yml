@@ -1,6 +1,6 @@
 # Checks of a pull request to the system repository (runtime aks-argocd): the required check "env-checks" of the
-# ruleset on main. system.json and gitops/ are consistent, the YAML is valid and builds with Kustomize, the Octopus
-# configuration is valid Terraform and the cluster's Bicep compiles.
+# ruleset on main. No secret in the history, system.json and gitops/ are consistent, the YAML is valid and builds with
+# Kustomize, the Octopus configuration is valid Terraform and the Bicep compiles without a warning.
 name: env-checks
 
 on:
@@ -16,6 +16,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.1
+        with:
+          fetch-depth: 0
+
+      # No secret in the repository (capability CAP-055); the command-line tool, not gitleaks-action, which needs a
+      # license for organization repositories.
+      - name: Secret scan
+        env:
+          GITLEAKS_VERSION: "8.30.1"
+        run: |
+          set -euo pipefail
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" | tar -xz gitleaks
+          ./gitleaks git . --redact --no-banner --exit-code 1
+          rm gitleaks
 
       - name: system.json and gitops/
         shell: pwsh
@@ -50,10 +63,18 @@ jobs:
           terraform_version: "1.16.4"
           terraform_wrapper: false
 
+      # Warnings fail like errors (no broken windows): Bicep writes its diagnostics to stderr with exit code 0. The
+      # setting keeps az from reporting its own config change when it installs Bicep.
       - name: Terraform and Bicep
+        env:
+          AZURE_BICEP_USE_BINARY_FROM_PATH: "false"
         run: |
           set -euo pipefail
           terraform -chdir=octopus fmt -check -diff
           terraform -chdir=octopus init -backend=false -input=false
           terraform -chdir=octopus validate
-          az bicep build --file infra/cluster.bicep --stdout > /dev/null
+          az bicep install
+          for file in infra/cluster.bicep bootstrap/seed.bicep; do
+            diagnostics=$(az bicep build --file "$file" --stdout 2>&1 >/dev/null | grep -E ': (Warning|Error) ' || true)
+            if [ -n "$diagnostics" ]; then echo "$diagnostics"; exit 1; fi
+          done

@@ -43,15 +43,14 @@ locals {
   }
   # Every other environment gets the demo employees from the app's own seeder (step "Seed demo employees", right after
   # "Migrate database"); in the environments above, ZDataLoader loads the same employees.
-  seed_environments = [for name, e in local.environments : name if !try(e.acceptanceTests, false)]
-  seeded_deployables = length(local.seed_environments) == 0 ? {} : {
+  seeded_deployables = {
     for name, d in local.migrated_deployables : name => d
     if try(d.acceptanceTestsPackage, "") != "" && try(d.dataLoaderAssembly, "") != ""
   }
   # Every environment after the first waits for a sign-off by the space's Space Managers (people join that team to
   # sign off; automation answers only with a recorded reason).
-  promoted_environments = [for name, e in local.environments : name if e.sort_order > 1]
-  sign_off_team_id      = "teams-spacemanagers-${local.system.octopus.spaceId}"
+  first_environment = local.system.environments[0].name
+  sign_off_team_id  = "teams-spacemanagers-${local.system.octopus.spaceId}"
   # Deployment freezes from system.json: [{ "name", "start", "end", "environments" (default: the prod tier) }].
   freezes           = try(local.system.freezes, [])
   prod_environments = [for name, e in local.environments : name if e.tier == "prod"]
