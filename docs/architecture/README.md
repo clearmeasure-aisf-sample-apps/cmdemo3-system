@@ -33,3 +33,9 @@ Source: [03-system-repository.puml](03-system-repository.puml)
 ![Phase 3a: tdd environment from the pipeline (2026-10-04)](03a-tdd-environment.png)
 
 Source: [03a-tdd-environment.puml](03a-tdd-environment.puml)
+
+## Phase 4: app repository pushed (2026-10-04)
+
+![Phase 4: app repository pushed (2026-10-04)](04-app-repository.png)
+
+Source: [04-app-repository.puml](04-app-repository.puml)
