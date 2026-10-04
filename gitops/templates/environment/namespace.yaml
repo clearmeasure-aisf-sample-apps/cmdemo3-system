@@ -1,0 +1,9 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: "#{System.Slug}-#{Octopus.Environment.Name}"
+  labels:
+    system: "#{System.Slug}"
+    environment: "#{Octopus.Environment.Name}"
+    tier: "#{Environment.Tier}"

@@ -1,0 +1,25 @@
+# yamllint configuration of the system repository (job env-checks).
+extends: default
+
+ignore: |
+  .git/
+  .terraform/
+
+rules:
+  line-length:
+    max: 200
+    allow-non-breakable-words: true
+    allow-non-breakable-inline-mappings: true
+  document-start: disable
+  indentation:
+    spaces: consistent
+    indent-sequences: whatever
+    check-multi-line-strings: false
+  comments:
+    require-starting-space: true
+    min-spaces-from-content: 1
+  comments-indentation: disable
+  # GitHub Actions workflows start with the key `on`.
+  truthy:
+    allowed-values: ["true", "false"]
+    check-keys: false

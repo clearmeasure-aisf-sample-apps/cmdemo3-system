@@ -1,0 +1,31 @@
+@startuml 01-octopus-foothold
+!include _c4.iuml
+title Clear Measure work orders demo 3 (AKS and Argo CD) | Phase 1: Octopus foothold (2026-10-04)
+
+Boundary(box, "Operator machine omarchy") {
+  Container(aiops, "Linux user aiops", "Claude Code, gh, az, pwsh", "Ran new-octopus-foothold.ps1")
+}
+
+Boundary(octo, "Octopus https://clearmeasure.octopus.app") {
+  Container(aiops_octo, "ai-ops", "AI service account", "Octopus Managers")
+  Boundary(space, "Space cmdemo3 demo (Spaces-357, slug cmdemo3-demo)") {
+    Container(sa, "cmdemo3-github", "service account Users-785, Space Manager", "No password, no API key: GitHub signs in with OIDC (ExternalId 1ce89007-01eb-4832-8068-3dd93f8320d1)", $tags="new")
+    Container(oidc_sys, "OIDC identity", "issuer token.actions.githubusercontent.com", "repo:clearmeasure-aisf-sample-apps/cmdemo3-system:environment:octopus", $tags="new")
+    Container(oidc_app, "OIDC identity", "issuer token.actions.githubusercontent.com", "repo:clearmeasure-aisf-sample-apps/cmdemo3-workorders:environment:release", $tags="new")
+  }
+}
+
+Boundary(gh, "GitHub org clearmeasure-aisf-sample-apps") {
+  Container(sysrepo, "cmdemo3-system", "environment octopus", "Jobs octopus-apply and system-release", $tags="planned")
+  Container(apprepo, "cmdemo3-workorders", "environment release", "Workflow release.yml", $tags="planned")
+}
+
+Rel(aiops, aiops_octo, "REST", "API key")
+Rel(aiops_octo, space, "created; Space Manager", $tags="new")
+Rel(oidc_sys, sa, "signs in as", $tags="new")
+Rel(oidc_app, sa, "signs in as", $tags="new")
+Rel(sysrepo, oidc_sys, "OIDC token", $tags="planned")
+Rel(apprepo, oidc_app, "OIDC token", $tags="planned")
+
+SHOW_LEGEND()
+@enduml

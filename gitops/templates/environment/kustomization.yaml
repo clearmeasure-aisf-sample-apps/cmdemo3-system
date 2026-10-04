@@ -1,0 +1,10 @@
+# One environment of the system: its namespace and its SQL Server. Step "Apply environment" of the Octopus project
+# <slug>-system fills in the Octopus variables and writes this folder to gitops/environments/<env>/system, which Argo CD applies.
+# The deployables' manifests (apps/<deployable>) are written with it and applied by each deployable's own Application.
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: "#{System.Slug}-#{Octopus.Environment.Name}"
+resources:
+  - namespace.yaml
+  - db.yaml

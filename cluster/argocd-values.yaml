@@ -1,0 +1,28 @@
+# Values of the argo-cd Helm chart (cluster/apply-cluster.ps1 installs it). The Octopus Argo CD Gateway signs in as the
+# local account "octopus"; its capability and its four policy lines are the ones Octopus documents
+# (https://octopus.com/docs/argo-cd/instances/argo-user). The server runs without TLS of its own because the ingress
+# ends TLS for the web UI, so the gateway connects with gateway.argocd.plaintext=true.
+configs:
+  params:
+    server.insecure: true
+  cm:
+    accounts.octopus: apiKey
+    accounts.octopus.enabled: "true"
+    # A person who watches the demo: read-only. An administrator sets its password
+    # (argocd account update-password --account viewer).
+    accounts.viewer: login
+    # A commit of Octopus reaches the cluster within a minute.
+    timeout.reconciliation: 60s
+  rbac:
+    policy.csv: |
+      p, octopus, applications, get, *, allow
+      p, octopus, applications, sync, *, allow
+      p, octopus, clusters, get, *, allow
+      p, octopus, logs, get, */*, allow
+      g, viewer, role:readonly
+dex:
+  enabled: false
+notifications:
+  enabled: false
+applicationSet:
+  replicas: 0

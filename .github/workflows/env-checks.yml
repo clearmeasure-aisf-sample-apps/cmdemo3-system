@@ -1,0 +1,59 @@
+# Checks of a pull request to the system repository (runtime aks-argocd): the required check "env-checks" of the
+# ruleset on main. system.json and gitops/ are consistent, the YAML is valid and builds with Kustomize, the Octopus
+# configuration is valid Terraform and the cluster's Bicep compiles.
+name: env-checks
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  env-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.1
+
+      - name: system.json and gitops/
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          ./scripts/write-gitops.ps1
+          # A file the script would change means system.json was changed without running it.
+          git diff --exit-code
+          if (git status --porcelain) { throw 'scripts/write-gitops.ps1 writes files that are not committed: run it and commit the result.' }
+          ./scripts/test-system.ps1
+
+      - name: yamllint
+        run: |
+          set -euo pipefail
+          pipx install yamllint
+          yamllint --strict .
+
+      - name: Kustomize builds
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          kubectl kustomize gitops/platform | Out-Null
+          foreach ($pin in Get-ChildItem -Path gitops/environments -Recurse -Filter kustomization.yaml | Where-Object { $_.Directory.Parent.Parent.Name -eq 'environments' }) {
+              kubectl kustomize $pin.DirectoryName | Out-Null
+              Write-Host "PASS $([IO.Path]::GetRelativePath($PWD, $pin.DirectoryName))"
+          }
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.16.4"
+          terraform_wrapper: false
+
+      - name: Terraform and Bicep
+        run: |
+          set -euo pipefail
+          terraform -chdir=octopus fmt -check -diff
+          terraform -chdir=octopus init -backend=false -input=false
+          terraform -chdir=octopus validate
+          az bicep build --file infra/cluster.bicep --stdout > /dev/null

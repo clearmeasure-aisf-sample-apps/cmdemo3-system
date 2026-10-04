@@ -1,0 +1,132 @@
+# The system pipeline (runtime aks-argocd). Every merge to main, except a commit of Octopus (which changes only
+# gitops/environments/) and a documentation change under docs/ or in Markdown:
+#   1. octopus-apply   configures Octopus from octopus/ and system.json (environments, lifecycle, feeds, the worker
+#                      pool, the Git credential, projects)
+#   2. cluster-apply   applies infra/cluster.bicep (the one AKS cluster), installs Argo CD with the root Application,
+#                      and registers the Octopus Argo CD Gateway and the Octopus Kubernetes worker
+#                      (cluster/apply-cluster.ps1)
+#   3. system-release  creates the release of <slug>-system for this commit; the lifecycle deploys it to the first
+#                      environment: Octopus writes the environment's manifests to Git and Argo CD applies them.
+# On the very first push this run is what creates the Octopus projects, the cluster and the first environment.
+# Credentials: GitHub OIDC only. Azure as id-<slug>-octopus-config (Terraform state) and id-<slug>-cluster (the
+# cluster), Octopus as the system's service account (OctopusDeploy/login). The one stored secret is
+# OCTOPUS_GITHUB_TOKEN, handed to Octopus as the Git credential of its Argo CD steps.
+name: system
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "gitops/environments/**"
+      - "**/*.md"
+      - "docs/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: system
+  cancel-in-progress: false
+
+env:
+  ARM_USE_OIDC: "true"
+  ARM_USE_AZUREAD: "true"
+  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID_OCTOPUS_CONFIG }}
+  # The Octopus actions (create-release) look the space up by name, not by ID.
+  OCTOPUS_SPACE: ${{ vars.OCTOPUS_SPACE_NAME }}
+
+jobs:
+  octopus-apply:
+    runs-on: ubuntu-latest
+    environment: octopus
+    steps:
+      - uses: actions/checkout@v6.0.1
+
+      - name: Sign in to Octopus
+        uses: OctopusDeploy/login@v2
+        with:
+          server: ${{ vars.OCTOPUS_URL }}
+          service_account_id: ${{ vars.OCTOPUS_SERVICE_ACCOUNT_ID }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.16.4"
+          terraform_wrapper: false
+
+      - name: Apply octopus/
+        working-directory: octopus
+        shell: pwsh
+        env:
+          TF_VAR_github_token: ${{ secrets.OCTOPUS_GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $env:TF_VAR_octopus_access_token = $env:OCTOPUS_ACCESS_TOKEN
+          $state = (Get-Content -LiteralPath ../system.json -Raw | ConvertFrom-Json).azure.terraformState
+          terraform init -input=false `
+            "-backend-config=resource_group_name=$($state.resourceGroup)" `
+            "-backend-config=storage_account_name=$($state.storageAccount)" `
+            "-backend-config=container_name=$($state.container)" `
+            '-backend-config=key=octopus.tfstate' `
+            '-backend-config=use_azuread_auth=true'
+          terraform apply -input=false -auto-approve -parallelism=1
+
+  cluster-apply:
+    needs: octopus-apply
+    runs-on: ubuntu-latest
+    environment: octopus
+    steps:
+      - uses: actions/checkout@v6.0.1
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID_CLUSTER }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign in to Octopus
+        uses: OctopusDeploy/login@v2
+        with:
+          server: ${{ vars.OCTOPUS_URL }}
+          service_account_id: ${{ vars.OCTOPUS_SERVICE_ACCOUNT_ID }}
+
+      - name: Apply the cluster, Argo CD, the Octopus gateway and worker
+        shell: pwsh
+        run: ./cluster/apply-cluster.ps1
+
+  system-release:
+    needs: cluster-apply
+    runs-on: ubuntu-latest
+    environment: octopus
+    steps:
+      - uses: actions/checkout@v6.0.1
+
+      - name: Name the release
+        id: release
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $slug = (Get-Content -LiteralPath system.json -Raw | ConvertFrom-Json).system.slug
+          "version=1.0.${{ github.run_number }}" >> $env:GITHUB_OUTPUT
+          "project=$slug-system" >> $env:GITHUB_OUTPUT
+
+      - name: Sign in to Octopus
+        uses: OctopusDeploy/login@v2
+        with:
+          server: ${{ vars.OCTOPUS_URL }}
+          service_account_id: ${{ vars.OCTOPUS_SERVICE_ACCOUNT_ID }}
+
+      # The release records the commit main points to now as the source of step "Apply environment" (its manifest
+      # templates), so a promotion to a later environment applies the same commit.
+      - name: Create the release
+        uses: OctopusDeploy/create-release-action@v4
+        with:
+          project: ${{ steps.release.outputs.project }}
+          release_number: ${{ steps.release.outputs.version }}
+          git_resources: "Apply environment:refs/heads/main"
+          ignore_existing: true
+          release_notes: "Commit ${{ github.sha }}: ${{ github.event.head_commit.message || 'manual run' }}"

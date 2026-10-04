@@ -1,0 +1,34 @@
+# What the Octopus Kubernetes worker's script pods may do outside their own namespace: create an environment's
+# namespace and its database credentials (step "Prepare environment"), read those credentials (the database and test
+# steps) and read the workloads they verify. Octopus holds no credential of the cluster; the worker polls Octopus.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: octopus-worker-environments
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "create"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "services"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "replicasets"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: octopus-worker-environments
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: octopus-worker-environments
+subjects:
+  - kind: ServiceAccount
+    name: octopus-worker-scripts
+    namespace: octopus-worker

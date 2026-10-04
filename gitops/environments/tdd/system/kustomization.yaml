@@ -1,0 +1,6 @@
+# Environment tdd: step "Apply environment" of the Octopus project cmdemo3-system replaces this folder with
+# gitops/templates/environment of the release it deploys. Do not edit it by hand.
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources: []
