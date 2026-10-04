@@ -1,0 +1,54 @@
+@startuml 03a-tdd-environment
+!include _c4.iuml
+title Clear Measure work orders demo 3 (AKS and Argo CD) | Phase 3a: tdd environment from the pipeline (2026-10-04)
+
+Person(viewer, "Class audience", "Browser")
+
+Boundary(gh, "GitHub org clearmeasure-aisf-sample-apps") {
+  Container(sysrepo, "cmdemo3-system", "public repository", "gitops/templates/environment (templates); gitops/environments/tdd (what runs)")
+  Container(wf_system, "Workflow system", "GitHub Actions", "octopus-apply, cluster-apply, system-release (OIDC only)")
+}
+
+Boundary(octo, "Octopus space cmdemo3 demo") {
+  Container(octo_cfg, "Environments, lifecycle cmdemo3-lifecycle", "Terraform octopus/", "tdd", $tags="new")
+  Container(instance, "Argo CD instance argocd-cmdemo3", "registered by the gateway", "Serves tdd", $tags="new")
+  Container(pool, "Worker pool cmdemo3-cluster", "Kubernetes worker cmdemo3-worker", "Script steps inside the cluster", $tags="new")
+  Container(rel_sys, "cmdemo3-system 1.0.2", "release of a commit", "Deployed to tdd: Prepare, Apply (Update Argo CD Application Manifests), Initialize database, Verify", $tags="new")
+}
+
+Boundary(rgc, "rg-cmdemo3-cluster (southcentralus)") {
+  Boundary(aksb, "aks-cmdemo3 (stack-cmdemo3-cluster)") {
+    Container(argocd, "Argo CD", "namespace argocd; https://argocd-cmdemo3.20-225-155-175.sslip.io", "Applications cmdemo3-system-tdd, cmdemo3-ui-tdd", $tags="new")
+    Container(gateway, "Octopus Argo CD Gateway", "namespace octopus-argocd-gateway", "Outbound to Octopus (gRPC 8443)", $tags="new")
+    Container(k8sworker, "Octopus Kubernetes worker", "namespace octopus-worker", "Polls Octopus", $tags="new")
+    Container(ingress, "Envoy Gateway, cert-manager", "namespace platform-ingress", "20.225.155.175; Let's Encrypt certificates", $tags="new")
+    Boundary(ns, "Namespace cmdemo3-tdd") {
+      ContainerDb(sql, "db", "SQL Server 2022 Express, StatefulSet, 8 GiB disk", "Database cmdemo3; Secret db-credentials", $tags="new")
+      Container(app, "ui", "Deployment", "Placeholder image until the first app release; https://cmdemo3-tdd.20-225-155-175.sslip.io", $tags="new")
+    }
+  }
+}
+
+Boundary(rgn, "rg-cmdemo3-nonprod") {
+  ContainerDb(acr, "acrcmdemo3q3zmsi", "Container Registry", "cmdemo3/ui:0.0.0-placeholder")
+}
+
+Rel(sysrepo, wf_system, "merge to main")
+Rel(wf_system, octo_cfg, "terraform apply", "OIDC", $tags="new")
+Rel(wf_system, argocd, "cluster stack; Helm: Argo CD, gateway, worker", "OIDC as id-cmdemo3-cluster", $tags="new")
+Rel(wf_system, rel_sys, "create release", $tags="new")
+Rel(gateway, instance, "registered with a one-hour token", $tags="new")
+Rel(k8sworker, pool, "registered with a one-hour token", $tags="new")
+Rel(rel_sys, pool, "1. Prepare environment: namespace, db-credentials", $tags="new")
+Rel(rel_sys, sysrepo, "2. Apply environment: commits the manifests", "Git credential, restricted to this repository", $tags="new")
+Rel(rel_sys, instance, "2. triggers the sync, waits for healthy", $tags="new")
+Rel(argocd, sysrepo, "reads gitops/", $tags="new")
+Rel(argocd, ns, "applies", $tags="new")
+Rel(k8sworker, sql, "3. Initialize database; 4. Verify", $tags="new")
+Rel(app, sql, "SQL connection (inside the cluster only)", $tags="new")
+Rel(app, acr, "pull image", "id-cmdemo3-kubelet", $tags="new")
+Rel(viewer, ingress, "HTTPS", $tags="new")
+Rel(ingress, app, "route", $tags="new")
+
+SHOW_LEGEND()
+@enduml
