@@ -1,0 +1,49 @@
+@startuml 06-prod-environment
+!include _c4.iuml
+title Clear Measure work orders demo 3 (AKS and Argo CD) | Progression: prod added and promoted (2026-10-04)
+
+Person(viewer, "Class audience", "Browser")
+Person(approver, "Space Manager", "Signs off a promotion, with a recorded note")
+
+Boundary(gh, "GitHub org clearmeasure-aisf-sample-apps") {
+  Container(sysrepo, "cmdemo3-system", "system repository", "system.json lists tdd, uat, prod; gitops/environments/prod", $tags="new")
+}
+
+Boundary(octo, "Octopus space cmdemo3 demo") {
+  Container(lifecycle, "cmdemo3-lifecycle", "lifecycle", "tdd (automatic), uat, then prod (promotions with sign-off)", $tags="new")
+  Container(instance, "Argo CD instance argocd-cmdemo3", "gateway", "Serves tdd, uat and prod", $tags="new")
+  Container(proj_sys, "cmdemo3-system", "project", "tdd 1.0.6, uat 1.0.6, prod 1.0.6", $tags="new")
+  Container(proj_app, "cmdemo3-ui", "project", "tdd 2.4.2, uat 2.4.2, prod 2.4.2", $tags="new")
+}
+
+Boundary(rgn, "rg-cmdemo3-nonprod") {
+  ContainerDb(acr, "acrcmdemo3q3zmsi", "Container Registry", "cmdemo3/ui")
+}
+
+Boundary(aksb, "aks-cmdemo3 in rg-cmdemo3-cluster: one cluster for both tiers") {
+  Container(argocd, "Argo CD", "namespace argocd", "Applications of tdd, uat and prod", $tags="new")
+  Container(ingress, "Envoy Gateway", "20.225.155.175", "Listeners https-tdd, https-uat, https-prod", $tags="new")
+  Container(k8sworker, "Octopus Kubernetes worker", "namespace octopus-worker")
+  Container(nonprod_apps, "Namespaces cmdemo3-tdd, cmdemo3-uat", "nonprod", "https://cmdemo3-tdd.20-225-155-175.sslip.io, https://cmdemo3-uat.20-225-155-175.sslip.io")
+  Boundary(prod, "Namespace cmdemo3-prod") {
+    Container(prod_app, "ui", "Deployment", "https://cmdemo3-prod.20-225-155-175.sslip.io", $tags="new")
+    ContainerDb(prod_sql, "db", "SQL Server 2022 Express, its own disk and credentials", $tags="new")
+  }
+}
+
+Rel(sysrepo, lifecycle, "pull request merged: octopus-apply adds prod", $tags="new")
+Rel(sysrepo, instance, "cluster-apply: the instance serves prod too", $tags="new")
+Rel(approver, proj_sys, "signs off the promotion to prod", $tags="new")
+Rel(approver, proj_app, "signs off the promotion to prod", $tags="new")
+Rel(proj_sys, sysrepo, "promote to prod: commits gitops/environments/prod/system", $tags="new")
+Rel(proj_app, sysrepo, "promote to prod: commits the image tag", $tags="new")
+Rel(proj_app, k8sworker, "Migrate database, Seed demo employees, Verify", $tags="new")
+Rel(argocd, sysrepo, "reads the commits")
+Rel(argocd, prod, "applies", $tags="new")
+Rel(k8sworker, prod_sql, "database steps", $tags="new")
+Rel(prod_app, acr, "pull image", "the nodes' identity, AcrPull", $tags="new")
+Rel(viewer, ingress, "HTTPS")
+Rel(ingress, prod_app, "route", $tags="new")
+
+SHOW_LEGEND()
+@enduml
