@@ -1,0 +1,9 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: "cmdemo3-prod"
+  labels:
+    system: "cmdemo3"
+    environment: "prod"
+    tier: "prod"
