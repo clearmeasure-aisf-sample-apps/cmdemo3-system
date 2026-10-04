@@ -1,6 +1,10 @@
-# Environment uat: step "Apply environment" of the Octopus project cmdemo3-system replaces this folder with
-# gitops/templates/environment of the release it deploys. Do not edit it by hand.
+# One environment of the system: its namespace and its SQL Server. Step "Apply environment" of the Octopus project
+# <slug>-system fills in the Octopus variables and writes this folder to gitops/environments/<env>/system, which Argo CD applies.
+# The deployables' manifests (apps/<deployable>) are written with it and applied by each deployable's own Application.
 ---
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-resources: []
+namespace: "cmdemo3-uat"
+resources:
+  - namespace.yaml
+  - db.yaml

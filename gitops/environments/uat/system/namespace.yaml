@@ -1,0 +1,9 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: "cmdemo3-uat"
+  labels:
+    system: "cmdemo3"
+    environment: "uat"
+    tier: "nonprod"
