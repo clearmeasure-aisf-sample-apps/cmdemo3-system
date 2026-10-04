@@ -123,6 +123,11 @@
       "tier": "nonprod",
       "acceptanceTests": true,
       "appCpu": "0.5"
+    },
+    {
+      "name": "uat",
+      "tier": "nonprod",
+      "appCpu": "0.5"
     }
   ],
   "cluster": {
