@@ -8,3 +8,4 @@ namespace: "cmdemo3-uat"
 resources:
   - namespace.yaml
   - db.yaml
+  - backup.yaml
