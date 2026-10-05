@@ -251,7 +251,9 @@ output identities object = union(
         aks: cluster!.outputs.controlPlane
         kubelet: cluster!.outputs.kubelet
         feed: cluster!.outputs.feed
+        backup: cluster!.outputs.backupIdentity
       }
     : {}
 )
 output ingress object = hasCluster ? cluster!.outputs.ingress : {}
+output backup object = hasCluster ? cluster!.outputs.backup : {}

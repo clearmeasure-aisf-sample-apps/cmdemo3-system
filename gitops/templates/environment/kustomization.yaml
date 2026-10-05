@@ -8,3 +8,4 @@ namespace: "#{System.Slug}-#{Octopus.Environment.Name}"
 resources:
   - namespace.yaml
   - db.yaml
+  - backup.yaml

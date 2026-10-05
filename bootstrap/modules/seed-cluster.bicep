@@ -1,7 +1,7 @@
 // Runtime aks-argocd: what the one cluster of every environment needs before the pipeline creates it. The identity the
 // system repository's cluster job signs in as (Contributor of this resource group), the cluster's own identity and
-// its kubelet identity (which pulls the app images), the identity of the Octopus container feed, and the public IP of
-// the ingress, so the host names of the environments are known before the cluster exists and survive a rebuild of it.
+// its kubelet identity (which pulls the app images), the identity of the Octopus container feed, the storage account
+// and identity of the SQL backups, and the public IP of the ingress, so the host names of the environments are known before the cluster exists and survive a rebuild of it.
 targetScope = 'resourceGroup'
 
 param slug string
@@ -110,6 +110,82 @@ resource feedCredential 'Microsoft.ManagedIdentity/userAssignedIdentities/federa
   }
 }
 
+// Backups of the environments' SQL Server containers leave the cluster: a storage account that accepts Microsoft Entra
+// sign-in only, and the identity the backup jobs use through workload identity (infra/cluster.bicep adds its federated
+// credentials once the cluster's issuer exists). A backup older than two weeks is deleted.
+var suffix = take(uniqueString(resourceGroup().id, slug), 6)
+
+resource backupAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
+  name: 'st${slug}bk${suffix}'
+  location: location
+  tags: tags
+  kind: 'StorageV2'
+  sku: {
+    name: 'Standard_LRS'
+  }
+  properties: {
+    allowBlobPublicAccess: false
+    allowSharedKeyAccess: false
+    minimumTlsVersion: 'TLS1_2'
+    supportsHttpsTrafficOnly: true
+  }
+}
+
+resource backupBlobs 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01' = {
+  parent: backupAccount
+  name: 'default'
+}
+
+resource backupContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
+  parent: backupBlobs
+  name: 'sql-backups'
+}
+
+resource backupRetention 'Microsoft.Storage/storageAccounts/managementPolicies@2023-05-01' = {
+  parent: backupAccount
+  name: 'default'
+  properties: {
+    policy: {
+      rules: [
+        {
+          name: 'delete-old-backups'
+          enabled: true
+          type: 'Lifecycle'
+          definition: {
+            filters: {
+              blobTypes: ['blockBlob']
+            }
+            actions: {
+              baseBlob: {
+                delete: {
+                  daysAfterModificationGreaterThan: 14
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
+
+resource backup 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+  name: 'id-${slug}-backup'
+  location: location
+  tags: tags
+}
+
+resource backupWriter 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(backupAccount.id, backup.id, 'blob-data-contributor')
+  scope: backupAccount
+  properties: {
+    principalId: backup.properties.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')
+    description: 'id-${slug}-backup: the backup jobs of the environments write and read the SQL backups'
+  }
+}
+
 resource ingressIp 'Microsoft.Network/publicIPAddresses@2024-05-01' = {
   name: 'pip-${slug}-ingress'
   location: location
@@ -159,6 +235,17 @@ output feed object = {
   name: feed.name
   clientId: feed.properties.clientId
   principalId: feed.properties.principalId
+}
+
+output backupIdentity object = {
+  name: backup.name
+  clientId: backup.properties.clientId
+  principalId: backup.properties.principalId
+}
+
+output backup object = {
+  storageAccount: backupAccount.name
+  container: backupContainer.name
 }
 
 output ingress object = {

@@ -1,6 +1,6 @@
 # What the Octopus Kubernetes worker's script pods may do outside their own namespace: create an environment's
 # namespace and its database credentials (step "Prepare environment"), read those credentials (the database and test
-# steps) and read the workloads they verify. Octopus holds no credential of the cluster; the worker polls Octopus.
+# steps), read the workloads they verify, and start the backup and restore-test jobs. Octopus holds no credential of the cluster; the worker polls Octopus.
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -19,6 +19,13 @@ rules:
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets", "replicasets"]
     verbs: ["get", "list"]
+  # Step "Record restore point" and runbook "Restore test" start a job from the environment's CronJobs and wait for it.
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    verbs: ["get"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

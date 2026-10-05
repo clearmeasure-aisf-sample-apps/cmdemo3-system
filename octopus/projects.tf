@@ -152,6 +152,24 @@ resource "octopusdeploy_process_step" "sign_off" {
   }
 }
 
+# Prod tier: a verified backup of the database before the release changes anything (scripts/record-restore-point.ps1).
+# The step excludes the nonprod environments instead of naming the prod ones, so a release made before prod existed
+# still records its restore point there.
+resource "octopusdeploy_process_step" "restore_point" {
+  for_each = local.migrated_deployables
+
+  process_id            = octopusdeploy_process.deployable[each.key].id
+  name                  = "Record restore point"
+  type                  = "Octopus.Script"
+  excluded_environments = [for name in local.nonprod_environments : octopusdeploy_environment.this[name].id]
+  worker_pool_id        = local.cluster_worker_pool_id
+  container             = local.container
+
+  execution_properties = merge(local.script_properties, {
+    "Octopus.Action.Script.ScriptBody" = file("${path.module}/../scripts/record-restore-point.ps1")
+  })
+}
+
 resource "octopusdeploy_process_step" "migrate" {
   for_each = local.migrated_deployables
 
@@ -321,6 +339,7 @@ resource "octopusdeploy_process_steps_order" "deployable" {
   process_id = octopusdeploy_process.deployable[each.key].id
   steps = concat(
     [octopusdeploy_process_step.sign_off[each.key].id],
+    contains(keys(local.migrated_deployables), each.key) ? [octopusdeploy_process_step.restore_point[each.key].id] : [],
     contains(keys(local.migrated_deployables), each.key) ? [octopusdeploy_process_step.migrate[each.key].id] : [],
     contains(keys(local.tested_deployables), each.key) ? [octopusdeploy_process_step.prepare_tests[each.key].id] : [],
     contains(keys(local.seeded_deployables), each.key) ? [octopusdeploy_process_step.seed_demo_employees[each.key].id] : [],

@@ -1,0 +1,311 @@
+# Backups of the environment's database, off the cluster: every night CronJob db-backup writes a backup to the
+# system's storage account (BACKUP DATABASE TO URL) and verifies it. Step "Record restore point" of the deployable's
+# Octopus project starts the same job before a prod-tier deployment, and runbook "Restore test" starts db-restore-test,
+# which restores the latest backup into a temporary database, counts its tables and drops it.
+#
+# No stored key: the pod signs in to Azure as id-<slug>-backup with its service account token (workload identity),
+# asks for a shared access signature that lasts four hours, and SQL Server uses it for this one backup.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: db-backup
+  labels:
+    app.kubernetes.io/name: db-backup
+  annotations:
+    azure.workload.identity/client-id: "#{Backup.ClientId}"
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: db-backup-scripts
+  labels:
+    app.kubernetes.io/name: db-backup
+data:
+  # First container (Azure CLI): the signature, and for a restore the name of the latest backup.
+  token.sh: |
+    set -euo pipefail
+    export HOME=/work AZURE_CONFIG_DIR=/work/.azure
+    umask 077
+    az login --service-principal --username "$AZURE_CLIENT_ID" --tenant "$AZURE_TENANT_ID" \
+      --federated-token "$(cat "$AZURE_FEDERATED_TOKEN_FILE")" --allow-no-subscriptions --output none
+    az storage container generate-sas --account-name "$BACKUP_ACCOUNT" --name "$BACKUP_CONTAINER" \
+      --permissions rwdl --expiry "$(date -u -d '+4 hours' '+%Y-%m-%dT%H:%MZ')" \
+      --auth-mode login --as-user --only-show-errors --output tsv > /work/sas
+    if [ "${MODE:-backup}" = restore ]; then
+      az storage blob list --account-name "$BACKUP_ACCOUNT" --container-name "$BACKUP_CONTAINER" \
+        --prefix "${BACKUP_PREFIX}/" --auth-mode login --num-results 5000 --only-show-errors \
+        --query "sort_by([], &properties.lastModified)[-1].name" --output tsv > /work/blob
+      if [ ! -s /work/blob ]; then
+        echo "db-restore-test: no backup under ${BACKUP_PREFIX}/ in ${BACKUP_ACCOUNT}/${BACKUP_CONTAINER}" >&2
+        exit 1
+      fi
+    fi
+    rm -rf /work/.azure
+  # Second container (SQL Server's tools): the backup, verified.
+  backup.sh: |
+    set -euo pipefail
+    url="https://${BACKUP_ACCOUNT}.blob.core.windows.net/${BACKUP_CONTAINER}"
+    blob="${BACKUP_PREFIX}/${JOB_NAME}-$(date -u '+%Y%m%dT%H%M%SZ').bak"
+    umask 077
+    {
+      echo "IF EXISTS (SELECT 1 FROM sys.credentials WHERE name = N'${url}') DROP CREDENTIAL [${url}];"
+      echo "CREATE CREDENTIAL [${url}] WITH IDENTITY = N'SHARED ACCESS SIGNATURE', SECRET = N'$(cat /work/sas)';"
+      echo "BACKUP DATABASE [${DB_NAME}] TO URL = N'${url}/${blob}' WITH CHECKSUM, FORMAT, COPY_ONLY, STATS = 25;"
+      echo "RESTORE VERIFYONLY FROM URL = N'${url}/${blob}' WITH CHECKSUM;"
+      echo "DROP CREDENTIAL [${url}];"
+    } > /work/job.sql
+    SQLCMDPASSWORD="$(cat /etc/db-credentials/sa-password)" /opt/mssql-tools18/bin/sqlcmd -S tcp:db,1433 -U sa -C -l 30 -b -x -i /work/job.sql
+    rm -f /work/job.sql /work/sas
+    echo "db-backup: ${url}/${blob}"
+  # Second container of the restore test: the latest backup into a temporary database, counted and dropped.
+  restore-test.sh: |
+    set -euo pipefail
+    url="https://${BACKUP_ACCOUNT}.blob.core.windows.net/${BACKUP_CONTAINER}"
+    blob="$(cat /work/blob)"
+    test="${DB_NAME}_restoretest"
+    umask 077
+    {
+      echo "SET NOCOUNT ON;"
+      echo "IF EXISTS (SELECT 1 FROM sys.credentials WHERE name = N'${url}') DROP CREDENTIAL [${url}];"
+      echo "CREATE CREDENTIAL [${url}] WITH IDENTITY = N'SHARED ACCESS SIGNATURE', SECRET = N'$(cat /work/sas)';"
+      echo "IF DB_ID(N'${test}') IS NOT NULL DROP DATABASE [${test}];"
+      echo "RESTORE DATABASE [${test}] FROM URL = N'${url}/${blob}' WITH CHECKSUM, STATS = 25,"
+      echo "  MOVE N'${DB_NAME}' TO N'/var/opt/mssql/data/${test}.mdf', MOVE N'${DB_NAME}_log' TO N'/var/opt/mssql/data/${test}_log.ldf';"
+      echo "DROP CREDENTIAL [${url}];"
+      echo "GO"
+      echo "DECLARE @tables int = (SELECT COUNT(*) FROM [${test}].sys.tables);"
+      echo "DROP DATABASE [${test}];"
+      echo "IF @tables = 0 THROW 50000, 'The restored database has no tables.', 1;"
+      echo "PRINT CONCAT('db-restore-test: ', @tables, ' tables restored');"
+      echo "GO"
+    } > /work/job.sql
+    SQLCMDPASSWORD="$(cat /etc/db-credentials/sa-password)" /opt/mssql-tools18/bin/sqlcmd -S tcp:db,1433 -U sa -C -l 30 -b -x -i /work/job.sql
+    rm -f /work/job.sql /work/sas
+    echo "db-restore-test: ${url}/${blob} restored into ${test}, checked and dropped"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: db-backup
+  labels:
+    app.kubernetes.io/name: db-backup
+spec:
+  # Every night; the minute differs per environment so the three backups do not start together.
+  schedule: "#{Backup.Minute} 7 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 1800
+      ttlSecondsAfterFinished: 172800
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: db-backup
+            azure.workload.identity/use: "true"
+        spec:
+          restartPolicy: Never
+          serviceAccountName: db-backup
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            fsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          initContainers:
+            - name: token
+              image: mcr.microsoft.com/azure-cli:2.90.0-azurelinux3.0
+              command: ["/bin/bash", "/scripts/token.sh"]
+              env:
+                - name: MODE
+                  value: backup
+                - name: BACKUP_ACCOUNT
+                  value: "#{Backup.StorageAccount}"
+                - name: BACKUP_CONTAINER
+                  value: "#{Backup.Container}"
+                - name: BACKUP_PREFIX
+                  value: "#{System.Slug}-#{Octopus.Environment.Name}"
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  memory: 512Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                    - ALL
+              volumeMounts:
+                - name: work
+                  mountPath: /work
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+          containers:
+            - name: backup
+              image: mcr.microsoft.com/mssql/server:2022-CU27-ubuntu-22.04
+              command: ["/bin/bash", "/scripts/backup.sh"]
+              env:
+                - name: DB_NAME
+                  value: "#{Database.Name}"
+                - name: BACKUP_ACCOUNT
+                  value: "#{Backup.StorageAccount}"
+                - name: BACKUP_CONTAINER
+                  value: "#{Backup.Container}"
+                - name: BACKUP_PREFIX
+                  value: "#{System.Slug}-#{Octopus.Environment.Name}"
+                - name: JOB_NAME
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.labels['job-name']
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  memory: 512Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                    - ALL
+              volumeMounts:
+                - name: work
+                  mountPath: /work
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+                - name: credentials
+                  mountPath: /etc/db-credentials
+                  readOnly: true
+          volumes:
+            - name: work
+              emptyDir:
+                medium: Memory
+            - name: scripts
+              configMap:
+                name: db-backup-scripts
+            - name: credentials
+              secret:
+                secretName: db-credentials
+                defaultMode: 288  # 0440: owner and group read
+                items:
+                  - key: sa-password
+                    path: sa-password
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: db-restore-test
+  labels:
+    app.kubernetes.io/name: db-restore-test
+spec:
+  # Never by schedule: runbook "Restore test" of the Octopus project <slug>-system starts a job from it.
+  schedule: "0 0 1 1 *"
+  suspend: true
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 1800
+      ttlSecondsAfterFinished: 172800
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: db-restore-test
+            azure.workload.identity/use: "true"
+        spec:
+          restartPolicy: Never
+          serviceAccountName: db-backup
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            fsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          initContainers:
+            - name: token
+              image: mcr.microsoft.com/azure-cli:2.90.0-azurelinux3.0
+              command: ["/bin/bash", "/scripts/token.sh"]
+              env:
+                - name: MODE
+                  value: restore
+                - name: BACKUP_ACCOUNT
+                  value: "#{Backup.StorageAccount}"
+                - name: BACKUP_CONTAINER
+                  value: "#{Backup.Container}"
+                - name: BACKUP_PREFIX
+                  value: "#{System.Slug}-#{Octopus.Environment.Name}"
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  memory: 512Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                    - ALL
+              volumeMounts:
+                - name: work
+                  mountPath: /work
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+          containers:
+            - name: restore-test
+              image: mcr.microsoft.com/mssql/server:2022-CU27-ubuntu-22.04
+              command: ["/bin/bash", "/scripts/restore-test.sh"]
+              env:
+                - name: DB_NAME
+                  value: "#{Database.Name}"
+                - name: BACKUP_ACCOUNT
+                  value: "#{Backup.StorageAccount}"
+                - name: BACKUP_CONTAINER
+                  value: "#{Backup.Container}"
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  memory: 512Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                    - ALL
+              volumeMounts:
+                - name: work
+                  mountPath: /work
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+                - name: credentials
+                  mountPath: /etc/db-credentials
+                  readOnly: true
+          volumes:
+            - name: work
+              emptyDir:
+                medium: Memory
+            - name: scripts
+              configMap:
+                name: db-backup-scripts
+            - name: credentials
+              secret:
+                secretName: db-credentials
+                defaultMode: 288  # 0440: owner and group read
+                items:
+                  - key: sa-password
+                    path: sa-password
