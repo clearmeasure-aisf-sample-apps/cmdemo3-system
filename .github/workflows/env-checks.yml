@@ -1,6 +1,7 @@
 # Checks of a pull request to the system repository (runtime aks-argocd): the required check "env-checks" of the
 # ruleset on main. No secret in the history, system.json and gitops/ are consistent, the YAML is valid and builds with
-# Kustomize, the Octopus configuration is valid Terraform and the Bicep compiles without a warning.
+# Kustomize, the Octopus configuration is valid Terraform and the Bicep compiles without a warning. Job "preview" shows
+# what the change would do to each environment and to the cluster; it informs and never blocks.
 name: env-checks
 
 on:
@@ -79,3 +80,31 @@ jobs:
             diagnostics=$(az bicep build --file "$file" --stdout 2>&1 >/dev/null | grep -E ': (Warning|Error) ' || true)
             if [ -n "$diagnostics" ]; then echo "$diagnostics"; exit 1; fi
           done
+
+  # What the change would do to each environment and to the cluster (capability CAP-002), in the job summary:
+  # scripts/preview-environment.ps1. It signs in to Azure as id-<slug>-plan (Reader and the what-if role), so it runs
+  # only for branches of this repository: a pull request from a fork gets no credential (CAP-012).
+  preview:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    environment: azure-read
+    continue-on-error: true
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID_PLAN }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Preview per environment
+        shell: pwsh
+        env:
+          PREVIEW_BASE: ${{ github.event.pull_request.base.sha }}
+        run: ./scripts/preview-environment.ps1
