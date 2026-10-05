@@ -12,12 +12,13 @@
     rolls it out; when the rollout does not become healthy (or a step before it fails), this step:
       1. Logs the reason Kubernetes gives for the new pods (image pull, crash loop) and the last lines of a crashed
          container, so the failed deployment says why.
-      2. Commits the tag of the release that ran before (Octopus.Release.CurrentForEnvironment.Number, the placeholder
-         when there was none) back to the file, so Git again names what runs. Argo CD rolls back to it; the old pods
-         kept serving meanwhile (maxUnavailable 0).
+      2. Commits the tag the file held before this deployment's pin (the file at the commit before its latest one;
+         the placeholder when there is none) back to it, so Git again names what runs. Argo CD rolls back to it; the
+         old pods kept serving meanwhile (maxUnavailable 0). The pin is the image's tag, the package version of step
+         "Update deployable", which is not always the release number.
       3. Waits until the Deployment runs that tag with every replica available.
-    It changes nothing when the file does not pin this release (the step before it never committed, or a later
-    deployment moved it). The commit goes through the GitHub API with GitHub.Token, as the pin commits of the other
+    It changes nothing when the file does not pin this deployment's tag (the step before it never committed, or a later
+    deployment moved it), or when the release redeployed is the one that ran (nothing changed in Git). The commit goes through the GitHub API with GitHub.Token, as the pin commits of the other
     runtime do; the token is never printed or passed as an argument.
 #>
 [CmdletBinding()]
@@ -35,8 +36,9 @@ $repository = [string] $OctopusParameters['System.Repository']
 $deployable = [string] $OctopusParameters['Deployable.Name']
 $release = [string] $OctopusParameters['Octopus.Release.Number']
 $deployment = [string] $OctopusParameters['Octopus.Deployment.Id']
-$previous = [string] $OctopusParameters['Octopus.Release.CurrentForEnvironment.Number']
-if (-not $previous -or $previous -eq $release) { $previous = '0.0.0-placeholder' }
+$tag = [string] $OctopusParameters["Octopus.Action[Update deployable].Package[$deployable].PackageVersion"]
+if (-not $tag) { $tag = $release }
+$ran = [string] $OctopusParameters['Octopus.Release.CurrentForEnvironment.Number']
 $namespace = "$slug-$environmentName"
 
 function Get-PodProblem {
@@ -70,7 +72,7 @@ else {
     Write-Host "No pod of $deployable in $namespace reports a start problem; the reason is in the failed step above."
 }
 
-# 2. The previous tag back in Git, unless the file does not pin this release.
+# 2. The previous tag back in Git, unless the file does not pin this deployment's tag.
 $path = "gitops/environments/$environmentName/$deployable/kustomization.yaml"
 $uri = "https://api.github.com/repos/$repository/contents/$path"
 $headers = @{
@@ -78,14 +80,30 @@ $headers = @{
     Accept                 = 'application/vnd.github+json'
     'X-GitHub-Api-Version' = '2022-11-28'
 }
+function Get-PinnedTag {
+    param([string] $Text)
+    [regex]::Match($Text, '(?m)^(\s*newTag:\s*)"?([^"\s]+)"?\s*$')
+}
+if ($ran -eq $release) {
+    Write-Highlight "Release $release ran in $environmentName before this deployment: Git pinned it already, nothing to revert."
+    return
+}
 $reverted = $false
 for ($attempt = 1; $attempt -le 4; $attempt++) {
     $file = Invoke-RestMethod -Uri "${uri}?ref=main" -Headers $headers
     $text = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(($file.content -replace '\s', '')))
-    $pinned = [regex]::Match($text, '(?m)^(\s*newTag:\s*)"?([^"\s]+)"?\s*$')
-    if (-not $pinned.Success -or $pinned.Groups[2].Value -ne $release) {
-        Write-Highlight "$path does not pin $deployable $release$(if ($pinned.Success) { " (it pins $($pinned.Groups[2].Value))" }): nothing to revert."
+    $pinned = Get-PinnedTag -Text $text
+    if (-not $pinned.Success -or $pinned.Groups[2].Value -ne $tag) {
+        Write-Highlight "$path does not pin $deployable $tag$(if ($pinned.Success) { " (it pins $($pinned.Groups[2].Value))" }): nothing to revert."
         break
+    }
+    # The tag before this deployment's pin: the file at the commit before the latest one that changed it.
+    $commits = @(Invoke-RestMethod -Uri "https://api.github.com/repos/$repository/commits?path=$path&sha=main&per_page=2" -Headers $headers)
+    $previous = '0.0.0-placeholder'
+    if ($commits.Count -ge 2) {
+        $before = Invoke-RestMethod -Uri "${uri}?ref=$($commits[1].sha)" -Headers $headers
+        $earlier = Get-PinnedTag -Text ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(($before.content -replace '\s', ''))))
+        if ($earlier.Success) { $previous = $earlier.Groups[2].Value }
     }
     $content = $text.Substring(0, $pinned.Index) + "$($pinned.Groups[1].Value)`"$previous`"" + $text.Substring($pinned.Index + $pinned.Length)
     $body = @{
@@ -116,15 +134,15 @@ if (-not $reverted) { return }
 $deadline = (Get-Date).AddMinutes(5)
 while ($true) {
     $state = kubectl get deployment $deployable --namespace $namespace --output json | ConvertFrom-Json
-    $tag = ([string] $state.spec.template.spec.containers[0].image) -replace '^.*:', ''
+    $running = ([string] $state.spec.template.spec.containers[0].image) -replace '^.*:', ''
     $wanted = [int] $state.spec.replicas
     $status = $state.status
     $updated = $status.PSObject.Properties['updatedReplicas'] ? [int] $status.updatedReplicas : 0
     $available = $status.PSObject.Properties['availableReplicas'] ? [int] $status.availableReplicas : 0
     $total = $status.PSObject.Properties['replicas'] ? [int] $status.replicas : 0
-    if ($tag -eq $previous -and $updated -eq $wanted -and $available -eq $wanted -and $total -eq $wanted) { break }
+    if ($running -eq $previous -and $updated -eq $wanted -and $available -eq $wanted -and $total -eq $wanted) { break }
     if ((Get-Date) -gt $deadline) {
-        Fail-Step "Argo CD did not roll $deployable in $environmentName back to $previous within 5 minutes (Deployment $deployable in $namespace runs $tag)."
+        Fail-Step "Argo CD did not roll $deployable in $environmentName back to $previous within 5 minutes (Deployment $deployable in $namespace runs $running)."
     }
     Start-Sleep -Seconds 10
 }

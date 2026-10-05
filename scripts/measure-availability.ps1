@@ -8,7 +8,7 @@
 .DESCRIPTION
     Step "Measure availability" (runtime aks-argocd), on the Kubernetes worker in the cluster, started together with
     the Argo CD step it watches; octopus/projects.tf inlines this file. Capability CAP-044.
-      <slug>-<deployable>  next to "Update deployable": until the Deployment runs the release's tag with every replica
+      <slug>-<deployable>  next to "Update deployable": until the Deployment runs the pinned tag with every replica
                            available, then 15 seconds more (the old pods go away); at most 7 minutes. When the new
                            pods cannot start, it stops once that is clear: "Update deployable" fails for it.
       <slug>-system        next to "Apply environment": at least 90 seconds (Argo CD finds the commit within one
@@ -32,6 +32,9 @@ $slug = [string] $OctopusParameters['System.Slug']
 $domain = [string] $OctopusParameters['Cluster.Domain']
 $only = [string] $OctopusParameters['Deployable.Name']
 $release = [string] $OctopusParameters['Octopus.Release.Number']
+# The tag the deployment pins: the image's package version (usually, not always, the release number).
+$tag = if ($only) { [string] $OctopusParameters["Octopus.Action[Update deployable].Package[$only].PackageVersion"] } else { '' }
+if (-not $tag) { $tag = $release }
 $namespace = "$slug-$environmentName"
 $baseUrl = "https://$slug-$environmentName.$domain"
 $deployables = @(([string] $OctopusParameters['System.Deployables']) | ConvertFrom-Json | Where-Object { -not $only -or $_.name -eq $only })
@@ -84,7 +87,7 @@ while ($true) {
         $workload = @(Get-Workload)
         if ($only) {
             $mine = @($workload | Where-Object { $_.Name -eq "Deployment/$only" })
-            $done = $mine.Count -eq 1 -and $mine[0].Tag -eq $release -and $mine[0].Done
+            $done = $mine.Count -eq 1 -and $mine[0].Tag -eq $tag -and $mine[0].Done
             if (Test-StartProblem -Name $only) { if (-not $problemSince) { $problemSince = $now } } else { $problemSince = $null }
             if ($problemSince -and ($now - $problemSince).TotalSeconds -ge 30) { $stopReason = "the new pods of $only cannot start (Update deployable reports it)"; break }
             $settle = 15
