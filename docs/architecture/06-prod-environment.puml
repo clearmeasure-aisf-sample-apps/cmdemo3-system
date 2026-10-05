@@ -12,7 +12,7 @@ Boundary(gh, "GitHub org clearmeasure-aisf-sample-apps") {
 Boundary(octo, "Octopus space cmdemo3 demo") {
   Container(lifecycle, "cmdemo3-lifecycle", "lifecycle", "tdd (automatic), uat, then prod (promotions with sign-off)", $tags="new")
   Container(instance, "Argo CD instance argocd-cmdemo3", "gateway", "Serves tdd, uat and prod", $tags="new")
-  Container(proj_sys, "cmdemo3-system", "project", "tdd 1.0.6, uat 1.0.6, prod 1.0.6", $tags="new")
+  Container(proj_sys, "cmdemo3-system", "project", "tdd 1.0.7, uat 1.0.7, prod 1.0.7", $tags="new")
   Container(proj_app, "cmdemo3-ui", "project", "tdd 2.4.2, uat 2.4.2, prod 2.4.2", $tags="new")
 }
 
