@@ -7,6 +7,7 @@
 #                      (cluster/apply-cluster.ps1)
 #   3. system-release  creates the release of <slug>-system for this commit; the lifecycle deploys it to the first
 #                      environment: Octopus writes the environment's manifests to Git and Argo CD applies them.
+#   4. capabilities    proves every capability of the system (scripts/test-capabilities.ps1), once Octopus is quiet.
 # On the very first push this run is what creates the Octopus projects, the cluster and the first environment.
 # Credentials: GitHub OIDC only. Azure as id-<slug>-octopus-config (Terraform state) and id-<slug>-cluster (the
 # cluster), Octopus as the system's service account (OctopusDeploy/login). The one stored secret is
@@ -141,3 +142,15 @@ jobs:
           git_resources: "Apply environment:refs/heads/main"
           ignore_existing: true
           release_notes: "Commit ${{ github.sha }}: ${{ github.event.head_commit.message || 'manual run' }}"
+
+  # Every system build ends by proving every capability of the system (scripts/test-capabilities.ps1, the same checks
+  # as the nightly run). The checks wait until Octopus is quiet, so they see the new release applied to the first
+  # environment and any app deployment it queued behind.
+  capabilities:
+    needs: system-release
+    permissions:
+      contents: read
+      id-token: write
+      issues: write
+    uses: ./.github/workflows/capabilities.yml
+    secrets: inherit
