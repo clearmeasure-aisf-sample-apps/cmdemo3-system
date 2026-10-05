@@ -30,6 +30,14 @@ An app release (`<slug>-<deployable>`, created by the app repository's release w
 Kubernetes worker in the cluster, then step "Update deployable" (Update Argo CD Application Image Tags) commits the
 image tag to `gitops/environments/<env>/<deployable>/kustomization.yaml`, and Argo CD rolls the Deployment.
 
+## Capability checks
+
+`scripts/test-capabilities.ps1` proves, read-only, every capability this system claims (one check per `CAP-NNN` of the
+demo-environment kit's `docs/capabilities.md`, section "Runtime aks-argocd"). Workflow `capabilities` runs it at the
+end of every `system` build and every night, as the system's own identities, and keeps an issue labelled `capability`
+open while a check fails. The checks do not enter the cluster: they read Git, Octopus (the Argo CD instance's health,
+the deployments and their logs), Azure as a reader, and the answers of the apps.
+
 ## After changing system.json
 
 Run `pwsh -NoProfile -File scripts/write-gitops.ps1` and commit what it writes; `env-checks` fails otherwise.
