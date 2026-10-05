@@ -66,6 +66,8 @@ resource "octopusdeploy_project_scheduled_trigger" "runbook" {
   name        = each.value.schedule
   description = "${each.value.name}: ${each.value.description}"
   timezone    = "UTC"
+  # A dormant cluster (cluster.dormant in system.json) runs nothing: the schedule pauses with it.
+  is_disabled = try(local.system.cluster.dormant, false)
 
   cron_expression_schedule {
     cron_expression = each.value.cron

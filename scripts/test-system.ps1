@@ -62,6 +62,9 @@ $cluster = if ($system.ContainsKey('cluster')) { $system.cluster } else { @{} }
 foreach ($key in 'name', 'nodeSize', 'domain', 'ingressIp', 'ingressPublicIpName') {
     Test-Rule "cluster.$key" (-not [string]::IsNullOrWhiteSpace([string] $cluster[$key]))
 }
+if ($cluster.ContainsKey('dormant')) {
+    Test-Rule 'cluster.dormant' ($cluster.dormant -is [bool]) 'true while the cluster is stopped between classes (set-demo-cluster.ps1), or left out'
+}
 Test-Rule 'cluster.nodeCount' ($cluster['nodeCount'] -is [long] -and $cluster.nodeCount -ge 1 -and $cluster.nodeCount -le 5) '1 to 5 nodes'
 Test-Rule 'sql.edition' ($system.ContainsKey('sql') -and @('Express', 'Developer') -ccontains [string] $system.sql['edition']) 'Express or Developer'
 Test-Rule 'cluster resource group' (-not [string]::IsNullOrWhiteSpace([string] $system.azure.resourceGroups['cluster']))

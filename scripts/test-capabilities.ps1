@@ -52,6 +52,8 @@ if (-not $ListChecks) {
     $environments = @($system.environments | ForEach-Object { [string] $_.name })
     $first = $environments[0]
     $clusterGroup = [string] $system.azure.resourceGroups.cluster
+    # Between classes the cluster is stopped (cluster.dormant): what only the running cluster can show is skipped.
+    $dormant = $system.cluster.ContainsKey('dormant') -and [bool] $system.cluster.dormant
 }
 
 function Write-Pass { param([string] $Message) Write-Host "PASS $Message" }
@@ -129,6 +131,9 @@ function Get-NoisyDeployment {
         }
     }
 }
+function Assert-Awake {
+    if ($dormant) { Skip-Check 'the cluster is dormant (cluster.dormant in system.json): nothing runs until it wakes' }
+}
 function Get-Pin([string] $Environment) {
     # What Git says the environment runs of the first deployable: the image and the tag that step "Update deployable"
     # (Update Argo CD Application Image Tags) commits, and Argo CD applies.
@@ -167,6 +172,7 @@ function Assert-That([bool] $Condition, [string] $Message) { if (-not $Condition
 
 $checks = [ordered] @{
     'CAP-001' = { $rules = gh api "repos/$systemRepo/rulesets" --jq '[.[] | select(.name=="default-branch" and .enforcement=="active")] | length'; Assert-That ([int] $rules -eq 1) 'no active default-branch ruleset'; 'ruleset default-branch active' }
+    'CAP-002' = { Assert-That ((Get-RepoFile $systemRepo '.github/workflows/env-checks.yml') -match 'preview-environment\.ps1') 'env-checks has no preview'; 'env-checks previews every environment and the cluster' }
     'CAP-003' = { Assert-AppRepository; $s = Get-RequiredCheck $systemRepo; $a = Get-RequiredCheck $appRepo; Assert-That ($s -contains 'env-checks' -and $a -contains 'Build result') "required: $s / $a"; "system: $($s -join ', '); app: $($a -join ', ')" }
     'CAP-004' = {
         # The deployment records the version: step "Update deployable" is Octopus's step "Update Argo CD Application
@@ -187,13 +193,15 @@ $checks = [ordered] @{
     'CAP-010' = { Assert-AppRepository; Assert-That ((Get-RequiredCheck $appRepo) -contains 'Build result') 'Build result not required'; 'Build result required on the app' }
     'CAP-011' = { $noisy = @(Get-NoisyDeployment); Assert-That ($noisy.Count -eq 0) "warnings in: $($noisy -join '; ')"; 'the current deployment of every project and environment logged no warning or error' }
     'CAP-012' = {
-        # env-checks is the only workflow a pull request starts, and it holds nothing to hand out: no identity token,
-        # no secret, and not the trigger that runs a fork's code with the repository's rights.
+        # env-checks is the only workflow a pull request starts. Its one credentialed job, the preview, runs only for
+        # branches of the repository; it reads no secret and does not use the trigger that runs a fork's code with the
+        # repository's rights.
         $workflow = Get-RepoFile $systemRepo '.github/workflows/env-checks.yml'
-        Assert-That ($workflow -notmatch 'id-token' -and $workflow -notmatch '\bsecrets\.' -and $workflow -notmatch 'pull_request_target') 'env-checks can reach a credential'
-        'env-checks asks for no identity token and reads no secret: a pull request gets no credential'
+        Assert-That ($workflow -match 'head\.repo\.full_name == github\.repository' -and $workflow -notmatch '\bsecrets\.' -and $workflow -notmatch 'pull_request_target') 'a pull request from a fork can reach a credential'
+        'the credentialed preview runs only for branches of the repository; env-checks reads no secret'
     }
     'CAP-013' = {
+        Assert-Awake
         $v = (Get-LastDeployment $deployableProject $first).Version
         $pinned = (Get-Pin $first).tag
         Assert-That ($pinned -eq $v) "$first pins image tag $pinned for release $v"
@@ -209,6 +217,7 @@ $checks = [ordered] @{
     'CAP-020' = {
         # Every environment pins the same repository of the system's registry, and environments on the same version
         # report the same build (the app's version carries its commit).
+        Assert-Awake
         $repository = "$($system.azure.registry.loginServer)/$slug/$deployable"
         $builds = @{}
         $shown = foreach ($e in $environments) {
@@ -230,6 +239,7 @@ $checks = [ordered] @{
         # What the pipeline creates, where it is recorded: the cluster's stack, the Argo CD instance Octopus knows (one,
         # healthy), the worker in the cluster, and per environment its Octopus environment, its registration with the
         # Argo CD instance and its Applications in Git.
+        Assert-Awake
         $stack = az stack group show --name "stack-$slug-cluster" --resource-group $clusterGroup --query provisioningState --output tsv
         Assert-That ($stack -eq 'succeeded') "stack-$slug-cluster is $stack"
         $instances = @((Invoke-Octopus "/api/$space/argocdinstances/summaries").Resources)
@@ -261,6 +271,17 @@ $checks = [ordered] @{
     }
     'CAP-034' = { $n = @(Get-ProcessStep $deployableProject | ForEach-Object Name); Assert-That ($n.IndexOf('Migrate database') -ge 0 -and $n.IndexOf('Migrate database') -lt $n.IndexOf('Update deployable')) 'Update before Migrate'; 'Migrate database before Update deployable' }
     'CAP-036' = { Assert-That (@(Get-ProcessStep $systemProject | Where-Object Name -eq 'Verify environment').Count -eq 1 -and @(Get-ProcessStep $deployableProject | Where-Object Name -eq 'Verify deployable').Count -eq 1) 'a verify step is missing'; 'both projects end with a verify step' }
+    'CAP-037' = {
+        # test-rollback.ps1 redeploys the previous release and then the current one: the first environment's history
+        # shows an older release deployed successfully after a newer one.
+        $project = Get-Project $deployableProject
+        $versions = @((Invoke-Octopus "/api/$space/deployments?projects=$($project.Id)&environments=$(Get-EnvironmentId $first)&take=30").Items |
+                Where-Object { (Invoke-Octopus "/api/tasks/$($_.TaskId)").State -eq 'Success' } |
+                ForEach-Object { [version] (Invoke-Octopus "/api/$space/releases/$($_.ReleaseId)").Version })
+        if (@($versions | Select-Object -Unique).Count -lt 2) { Skip-Check "fewer than two releases deployed in $first" }
+        $rolledBack = $false; for ($i = 0; $i -lt $versions.Count - 1; $i++) { if ($versions[$i] -lt $versions[$i + 1]) { $rolledBack = $true } }
+        Assert-That $rolledBack "no successful redeployment of an older release in $first"; "an older release was redeployed successfully in $first (test-rollback.ps1)"
+    }
     'CAP-038' = {
         # The sign-off step is in the process from the start (it excludes the first environment), so a release made
         # while the system had one environment still stops at it in every environment added later. Its responsible
@@ -285,6 +306,7 @@ $checks = [ordered] @{
         # Every environment's address is a host name on the cluster's one public address, which the seed created as a
         # static address outside the cluster's stack: pods, nodes and the cluster itself change behind it. Each address
         # answers over HTTPS with a certificate the caller trusts.
+        Assert-Awake
         $ip = [string] $system.cluster.ingressIp
         $address = az network public-ip show --name $system.cluster.ingressPublicIpName --resource-group $clusterGroup --query '{ip: ipAddress, method: publicIPAllocationMethod}' --output json | ConvertFrom-Json
         Assert-That ($address.ip -eq $ip -and $address.method -eq 'Static') "$($system.cluster.ingressPublicIpName) is $($address.ip) ($($address.method)); system.json names the static address $ip"
@@ -327,6 +349,7 @@ $checks = [ordered] @{
     'CAP-060' = {
         # The weekly restore test restores the environment's latest backup, whose name carries the time it was taken:
         # a test that passed on a backup older than a day and a half means the nightly backup did not run.
+        Assert-Awake
         $runs = @(Get-RecentRun 'Restore test' 8)
         Assert-That ($runs.Count -ge 1) 'no successful restore test in 8 days'
         $line = [regex]::Match((Invoke-Octopus "/api/tasks/$($runs[0].Id)/raw"), 'Restore test of [^\r\n]*').Value

@@ -23,6 +23,10 @@
          Gateway API definitions existed (it issues certificates for a Gateway only when they existed at its start).
     No token is printed or passed as an argument: Helm reads them from standard input. Octopus holds no credential of
     the cluster; the gateway and the worker connect out to Octopus.
+
+    Dormant between classes: with cluster.dormant true in system.json the job only stops the cluster (az aks stop:
+    its nodes go away, the disks, the public address and the registry stay) and reports dormant=true to the workflow,
+    which then makes no release. Without it, a stopped cluster is started first, and the steps above run as always.
 #>
 [CmdletBinding()]
 param(
@@ -58,6 +62,36 @@ $headers = @{ Authorization = "Bearer $token" }
 function Test-HelmRelease {
     param([string] $Name, [string] $Namespace)
     return [bool] (helm list --namespace $Namespace --filter "^$Name$" --deployed --short)
+}
+
+function Set-JobOutput {
+    param([string] $Name, [string] $Value)
+    if ($env:GITHUB_OUTPUT) { Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "$Name=$Value" }
+}
+
+# The cluster's power state, or nothing before the first apply created it.
+$PSNativeCommandUseErrorActionPreference = $false
+$power = [string] (az aks show --resource-group $resourceGroup --name $clusterName --query powerState.code --output tsv 2>$null)
+$PSNativeCommandUseErrorActionPreference = $true
+$power = $power.Trim()
+if ($system.cluster.ContainsKey('dormant') -and $system.cluster.dormant) {
+    Write-Host "==> Cluster $clusterName is dormant (cluster.dormant in system.json)"
+    Set-JobOutput -Name 'dormant' -Value 'true'
+    if (-not $power) { throw "cluster.dormant is set, but $clusterName does not exist yet: create it awake first." }
+    if ($power -eq 'Stopped') {
+        Write-Host "SKIP $clusterName is stopped already"
+    }
+    else {
+        az aks stop --resource-group $resourceGroup --name $clusterName --output none
+        Write-Host "PASS $clusterName stopped: no nodes run until cluster.dormant is removed"
+    }
+    return
+}
+Set-JobOutput -Name 'dormant' -Value 'false'
+if ($power -eq 'Stopped') {
+    Write-Host "==> Cluster $clusterName wakes (cluster.dormant is no longer set)"
+    az aks start --resource-group $resourceGroup --name $clusterName --output none
+    Write-Host "PASS $clusterName started"
 }
 
 Write-Host "==> Cluster $clusterName (stack-$slug-cluster in $resourceGroup)"

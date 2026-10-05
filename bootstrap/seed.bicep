@@ -1,5 +1,6 @@
-// Seed of a demo system (layer 0): the two resource groups, the shared registry, the Terraform state account for the
-// Octopus configuration, and every identity the pipelines sign in as, with their federated credentials and grants.
+// Seed of a demo system (layer 0): the two resource groups, the shared registry (only for a system that needs one,
+// containerRegistry), the Terraform state account for the Octopus configuration, and every identity the pipelines sign
+// in as, with their federated credentials and grants.
 // Applied once by the operator as subscription Owner (the demo-environment skill, new-demo-seed.ps1):
 //   az deployment sub create --location <region> --template-file bootstrap/seed.bicep --parameters @<file>
 // Nothing else creates identities or role assignments outside a resource group; every later Azure change goes through
@@ -48,6 +49,9 @@ param environments array
 @description('True for a system with a public address per environment: the seed then creates the resource group rg-<slug>-edge with the system\'s one Azure Front Door profile (Standard, a monthly base fee), which every environment with capability "frontdoor" adds its endpoint to.')
 param frontDoor bool = false
 
+@description('True (the default) for a system whose apps are container images: runtime aks-argocd, or a first app hosted as a container app. False for a system that needs no registry (first app on App Service: zips in the Octopus built-in feed): the seed then creates no registry, no identity id-<slug>-acr-push, no ACR role and no ACR role assignment; the output registry is {} and identities has no acrPush. The deployment is incremental: false deletes nothing that an earlier run created (remove-demo-registry.ps1 of the demo-environment skill does).')
+param containerRegistry bool = true
+
 param tags object = {}
 
 var githubIssuer = 'https://token.actions.githubusercontent.com'
@@ -56,6 +60,8 @@ var nonprodEnvironments = filter(environments, e => e.tier == 'nonprod')
 var prodEnvironments = filter(environments, e => e.tier == 'prod')
 var allTags = union(tags, { system: slug, purpose: 'demo' })
 var hasCluster = !empty(clusterResourceGroupName)
+// The cluster of runtime aks-argocd pulls its images from the registry, whatever containerRegistry says.
+var hasRegistry = containerRegistry || hasCluster
 var systemSubjectPrefix = githubSubjectPrefixes[?systemRepository] ?? 'repo:${githubOrg}/${systemRepository}'
 
 resource nonprodGroup 'Microsoft.Resources/resourceGroups@2024-03-01' = {
@@ -98,7 +104,8 @@ module edge 'modules/seed-edge.bicep' = if (frontDoor) {
   }
 }
 
-// Nonprod group: the registry, the state account, the identities of the pipelines and of tdd and uat.
+// Nonprod group: the registry (with containerRegistry), the state account, the identities of the pipelines and of tdd
+// and uat.
 module nonprod 'modules/seed-nonprod.bicep' = {
   name: 'seed-${slug}-nonprod'
   scope: nonprodGroup
@@ -112,6 +119,7 @@ module nonprod 'modules/seed-nonprod.bicep' = {
     planSubject: '${githubSubjectPrefixes[?systemRepository] ?? 'repo:${githubOrg}/${systemRepository}'}:environment:azure-read'
     octopusConfigSubject: '${githubSubjectPrefixes[?systemRepository] ?? 'repo:${githubOrg}/${systemRepository}'}:environment:octopus'
     capabilitiesSubject: '${githubSubjectPrefixes[?systemRepository] ?? 'repo:${githubOrg}/${systemRepository}'}:environment:capabilities'
+    containerRegistry: hasRegistry
     acrPushSubjects: [for repository in appRepositories: '${githubSubjectPrefixes[?repository] ?? 'repo:${githubOrg}/${repository}'}:environment:release']
     deploySubjects: flatten(map(nonprodEnvironments, e => map(octopusProjectSlugs, p => 'space:${octopusSpaceSlug}:project:${p}:environment:${e.name}')))
     appEnvironments: map(nonprodEnvironments, e => e.name)
@@ -175,7 +183,8 @@ module prodWhatIf 'modules/role-assignment.bicep' = {
   }
 }
 
-// Cross-group grants: the plan identity reads prod, and prod's runtime identities pull from the registry in nonprod.
+// Cross-group grants: the plan identity reads prod, and (with a registry) prod's runtime identities pull from the
+// registry in nonprod.
 module prodReader 'modules/role-assignment.bicep' = {
   name: 'seed-${slug}-prod-reader'
   scope: prodGroup
@@ -186,7 +195,7 @@ module prodReader 'modules/role-assignment.bicep' = {
   }
 }
 
-module prodAcrPull 'modules/registry-pull.bicep' = {
+module prodAcrPull 'modules/registry-pull.bicep' = if (hasRegistry) {
   name: 'seed-${slug}-prod-acr-pull'
   scope: nonprodGroup
   params: {
@@ -234,11 +243,14 @@ output resourceGroups object = union(
 output registry object = nonprod.outputs.registry
 output terraformState object = nonprod.outputs.terraformState
 output frontDoor object = frontDoor ? edge!.outputs.frontDoor : {}
+// Without a registry: registry is {} and identities has no acrPush (as frontDoor is {} without a profile).
 output identities object = union(
   {
     plan: nonprod.outputs.plan
     octopusConfig: nonprod.outputs.octopusConfig
-    acrPush: nonprod.outputs.acrPush
+  },
+  hasRegistry ? { acrPush: nonprod.outputs.acrPush } : {},
+  {
     deploy: {
       nonprod: nonprod.outputs.deploy
       prod: prod.outputs.deploy
