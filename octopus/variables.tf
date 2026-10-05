@@ -42,6 +42,9 @@ locals {
       # 0: sized from the worker (1.5 per core, 0.5 GB of memory per browser, at most 16).
       { key = "${name}-tests-workers", project = octopusdeploy_project.deployable[name].id, name = "AcceptanceTests.Workers", value = tostring(try(d.acceptanceTestsWorkers, 0)), environment = null },
       { key = "${name}-tests-delay", project = octopusdeploy_project.deployable[name].id, name = "AcceptanceTests.InputDelayMs", value = "200", environment = null },
+      # deployables[].acceptanceTestsFilter: the dotnet test filter of the run after a deployment (for example
+      # TestCategory=Smoke); empty runs the full suite.
+      { key = "${name}-tests-filter", project = octopusdeploy_project.deployable[name].id, name = "AcceptanceTests.Filter", value = try(d.acceptanceTestsFilter, ""), environment = null },
     ]
   ])
 

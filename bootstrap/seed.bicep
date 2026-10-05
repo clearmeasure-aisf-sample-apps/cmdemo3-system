@@ -45,6 +45,9 @@ param octopusProjectSlugs array
 @description('Every environment the system may ever have, with its tier: [{ name: "tdd", tier: "nonprod" }, ...].')
 param environments array
 
+@description('True for a system with a public address per environment: the seed then creates the resource group rg-<slug>-edge with the system\'s one Azure Front Door profile (Standard, a monthly base fee), which every environment with capability "frontdoor" adds its endpoint to.')
+param frontDoor bool = false
+
 param tags object = {}
 
 var githubIssuer = 'https://token.actions.githubusercontent.com'
@@ -72,6 +75,27 @@ resource clusterGroup 'Microsoft.Resources/resourceGroups@2024-03-01' = if (hasC
   name: hasCluster ? clusterResourceGroupName : 'unused'
   location: location
   tags: union(allTags, { tier: 'cluster' })
+}
+
+resource edgeGroup 'Microsoft.Resources/resourceGroups@2024-03-01' = if (frontDoor) {
+  name: 'rg-${slug}-edge'
+  location: location
+  tags: union(allTags, { tier: 'shared' })
+}
+
+// Edge group (only with frontDoor): the Front Door profile both tiers share, and who may write there.
+module edge 'modules/seed-edge.bicep' = if (frontDoor) {
+  name: 'seed-${slug}-edge'
+  scope: edgeGroup
+  params: {
+    slug: slug
+    tags: union(allTags, { tier: 'shared' })
+    deployPrincipalIds: [
+      nonprod.outputs.deploy.principalId
+      prod.outputs.deploy.principalId
+    ]
+    planPrincipalId: nonprod.outputs.plan.principalId
+  }
 }
 
 // Nonprod group: the registry, the state account, the identities of the pipelines and of tdd and uat.
@@ -209,6 +233,7 @@ output resourceGroups object = union(
 )
 output registry object = nonprod.outputs.registry
 output terraformState object = nonprod.outputs.terraformState
+output frontDoor object = frontDoor ? edge!.outputs.frontDoor : {}
 output identities object = union(
   {
     plan: nonprod.outputs.plan

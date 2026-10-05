@@ -1,0 +1,51 @@
+// Seed, edge group: the system's one Azure Front Door profile (Standard), shared by every environment of both tiers,
+// and the grants on its resource group. The profile is the only part of this template that costs money each month.
+// Each environment adds its own endpoint, origin group and route as stack-<slug>-<env>-edge in this group
+// (infra/modules/frontdoor.bicep, applied by scripts/apply-environment.ps1), so both deploy identities may write here;
+// the stacks' deny settings keep each tier out of the other's endpoints. The plan identity reads the group.
+targetScope = 'resourceGroup'
+
+param slug string
+param tags object
+@description('Principal IDs of the deploy identities of both tiers.')
+param deployPrincipalIds array
+param planPrincipalId string
+
+resource profile 'Microsoft.Cdn/profiles@2024-02-01' = {
+  name: 'afd-${slug}'
+  location: 'global'
+  tags: tags
+  sku: {
+    name: 'Standard_AzureFrontDoor'
+  }
+  properties: {
+    originResponseTimeoutSeconds: 60
+  }
+}
+
+resource contributors 'Microsoft.Authorization/roleAssignments@2022-04-01' = [
+  for principalId in deployPrincipalIds: {
+    name: guid(resourceGroup().id, principalId, 'b24988ac-6180-42a0-ab88-20f7382dd24c')
+    properties: {
+      principalId: principalId
+      principalType: 'ServicePrincipal'
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b24988ac-6180-42a0-ab88-20f7382dd24c') // Contributor
+      description: 'Deploy identity of a tier of ${slug}: its environments\' Front Door endpoints (stack-${slug}-<env>-edge)'
+    }
+  }
+]
+
+resource reader 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(resourceGroup().id, planPrincipalId, 'acdd72a7-3385-48ef-bd42-f606fba81ae7')
+  properties: {
+    principalId: planPrincipalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'acdd72a7-3385-48ef-bd42-f606fba81ae7') // Reader
+    description: 'id-${slug}-plan: capability checks of the Front Door endpoints'
+  }
+}
+
+output frontDoor object = {
+  resourceGroup: resourceGroup().name
+  profile: profile.name
+}
