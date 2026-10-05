@@ -8,3 +8,4 @@ namespace: "cmdemo3-tdd"
 resources:
   - namespace.yaml
   - db.yaml
+  - backup.yaml
