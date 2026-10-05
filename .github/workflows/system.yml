@@ -75,6 +75,12 @@ jobs:
             '-backend-config=use_azuread_auth=true'
           terraform apply -input=false -auto-approve -parallelism=1
 
+      # One task per environment means one queue for Octopus: without this, a newer task cancels a queued (or running)
+      # one of another project as "superseded".
+      - name: Keep queued tasks
+        shell: pwsh
+        run: ./scripts/keep-queued-tasks.ps1
+
   cluster-apply:
     needs: octopus-apply
     runs-on: ubuntu-latest
