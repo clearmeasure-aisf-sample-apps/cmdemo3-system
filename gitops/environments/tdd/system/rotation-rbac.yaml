@@ -1,0 +1,34 @@
+# What runbook "Rotate SQL passwords" may do in this environment's namespace, and only here: rewrite the Secret
+# db-credentials, read the sa password file SQL Server's pod sees (to change sa the moment the pod has the new one), and
+# restart the Deployments so the apps read their new password. The rest of the worker's rights are in
+# gitops/platform/worker-rbac.yaml.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: octopus-worker-rotation
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["db-credentials"]
+    verbs: ["get", "update"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    resourceNames: ["db-0"]
+    verbs: ["create", "get"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: octopus-worker-rotation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: octopus-worker-rotation
+subjects:
+  - kind: ServiceAccount
+    name: octopus-worker-scripts
+    namespace: octopus-worker
