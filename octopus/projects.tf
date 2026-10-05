@@ -115,6 +115,21 @@ resource "octopusdeploy_process_step" "system_verify" {
   })
 }
 
+# Started together with "Apply environment": the apps' availability while Argo CD applies the environment's manifests
+# (scripts/measure-availability.ps1, CAP-044).
+resource "octopusdeploy_process_step" "system_measure" {
+  process_id     = octopusdeploy_process.system.id
+  name           = "Measure availability"
+  type           = "Octopus.Script"
+  start_trigger  = "StartWithPrevious"
+  worker_pool_id = local.cluster_worker_pool_id
+  container      = local.container
+
+  execution_properties = merge(local.script_properties, {
+    "Octopus.Action.Script.ScriptBody" = file("${path.module}/../scripts/measure-availability.ps1")
+  })
+}
+
 resource "octopusdeploy_process_steps_order" "system" {
   process_id = octopusdeploy_process.system.id
   steps = concat(
@@ -122,6 +137,7 @@ resource "octopusdeploy_process_steps_order" "system" {
       octopusdeploy_process_step.system_sign_off.id,
       octopusdeploy_process_step.system_prepare.id,
       octopusdeploy_process_step.system_apply.id,
+      octopusdeploy_process_step.system_measure.id,
       octopusdeploy_process_step.system_database.id,
       octopusdeploy_process_step.system_verify.id,
     ],
@@ -252,8 +268,46 @@ resource "octopusdeploy_process_step" "update" {
     }
   }
 
+  # A new app version starts within two minutes (Argo CD finds the commit within one): five minutes without a healthy
+  # rollout is a version that cannot start, and step "Revert pin" then names the reason and puts the old tag back.
   execution_properties = merge(local.argo_properties, {
-    "Octopus.Action.ArgoCD.CommitMessageSummary" = "Pin #{Octopus.Project.Name} #{Octopus.Release.Number} in #{Octopus.Environment.Name}"
+    "Octopus.Action.ArgoCD.CommitMessageSummary"     = "Pin #{Octopus.Project.Name} #{Octopus.Release.Number} in #{Octopus.Environment.Name}"
+    "Octopus.Action.ArgoCD.StepVerification.Timeout" = "300"
+  })
+}
+
+# Runs only when an earlier step failed: names why the new version cannot start and commits the previous tag back
+# (scripts/revert-pin.ps1). It stands before the test steps, so failed acceptance tests fail the deployment, which
+# blocks its promotion, but leave the version that runs pinned.
+resource "octopusdeploy_process_step" "revert_pin" {
+  for_each = local.deployables
+
+  process_id     = octopusdeploy_process.deployable[each.key].id
+  name           = "Revert pin"
+  type           = "Octopus.Script"
+  condition      = "Failure"
+  worker_pool_id = local.cluster_worker_pool_id
+  container      = local.container
+
+  execution_properties = merge(local.script_properties, {
+    "Octopus.Action.Script.ScriptBody" = file("${path.module}/../scripts/revert-pin.ps1")
+  })
+}
+
+# Started together with "Update deployable": measures the app's availability while Argo CD rolls it out, and fails
+# the deployment on downtime (scripts/measure-availability.ps1, CAP-044).
+resource "octopusdeploy_process_step" "measure" {
+  for_each = local.deployables
+
+  process_id     = octopusdeploy_process.deployable[each.key].id
+  name           = "Measure availability"
+  type           = "Octopus.Script"
+  start_trigger  = "StartWithPrevious"
+  worker_pool_id = local.cluster_worker_pool_id
+  container      = local.container
+
+  execution_properties = merge(local.script_properties, {
+    "Octopus.Action.Script.ScriptBody" = file("${path.module}/../scripts/measure-availability.ps1")
   })
 }
 
@@ -345,7 +399,9 @@ resource "octopusdeploy_process_steps_order" "deployable" {
     contains(keys(local.seeded_deployables), each.key) ? [octopusdeploy_process_step.seed_demo_employees[each.key].id] : [],
     [
       octopusdeploy_process_step.update[each.key].id,
+      octopusdeploy_process_step.measure[each.key].id,
       octopusdeploy_process_step.verify[each.key].id,
+      octopusdeploy_process_step.revert_pin[each.key].id,
     ],
     contains(keys(local.tested_deployables), each.key) ? [
       octopusdeploy_process_step.open_test_database[each.key].id,

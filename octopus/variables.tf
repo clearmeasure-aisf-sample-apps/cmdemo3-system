@@ -1,4 +1,5 @@
-# Project variables. The scripts and the manifest templates read only these names; every value comes from system.json.
+# Project variables. The scripts and the manifest templates read only these names; every value comes from system.json
+# except GitHub.Token.
 
 locals {
   # One entry per project and variable name; environment = null means unscoped.
@@ -95,4 +96,17 @@ resource "octopusdeploy_variable" "concurrency_tag" {
   type        = "String"
   value       = "#{Octopus.Environment.Id}"
   description = "Serializes deployments per environment across projects."
+}
+
+# The deployable projects' step "Revert pin" commits the previous image tag back through the GitHub API with this
+# token (repository secret OCTOPUS_GITHUB_TOKEN, the same token as the Git credential of the Argo CD steps).
+resource "octopusdeploy_variable" "github_token" {
+  for_each = octopusdeploy_project.deployable
+
+  owner_id        = each.value.id
+  name            = "GitHub.Token"
+  type            = "Sensitive"
+  is_sensitive    = true
+  sensitive_value = var.github_token
+  description     = "Step Revert pin commits the previous image tag with it. From repository secret OCTOPUS_GITHUB_TOKEN."
 }
