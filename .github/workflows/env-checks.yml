@@ -20,14 +20,15 @@ jobs:
           fetch-depth: 0
 
       # No secret in the repository (capability CAP-055); the command-line tool, not gitleaks-action, which needs a
-      # license for organization repositories.
+      # license for organization repositories. It scans the history of the checked-out commit (--log-opts=HEAD), not
+      # every branch, so a finding on one branch fails that branch only.
       - name: Secret scan
         env:
           GITLEAKS_VERSION: "8.30.1"
         run: |
           set -euo pipefail
           curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" | tar -xz gitleaks
-          ./gitleaks git . --redact --no-banner --exit-code 1
+          ./gitleaks git . --redact --no-banner --exit-code 1 --log-opts="HEAD"
           rm gitleaks
 
       - name: system.json and gitops/
