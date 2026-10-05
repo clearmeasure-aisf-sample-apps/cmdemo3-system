@@ -70,7 +70,10 @@ function Get-RequiredCheck([string] $Repo) {
 }
 function Get-Project([string] $Slug) { Invoke-Octopus "/api/$space/projects/$Slug" }
 function Get-ProcessStep([string] $Slug) { @((Invoke-Octopus "/api/$space/projects/$((Get-Project $Slug).Id)/deploymentprocesses").Steps) }
-function Get-EnvironmentId([string] $Name) { @((Invoke-Octopus "/api/$space/environments?partialName=$Name&take=100").Items | Where-Object Name -eq $Name)[0].Id }
+function Get-EnvironmentId([string] $Name) {
+    # Nothing when Octopus has no such environment: an index into an empty list would throw in strict mode.
+    (Invoke-Octopus "/api/$space/environments?partialName=$Name&take=100").Items | Where-Object Name -eq $Name | Select-Object -First 1 | ForEach-Object Id
+}
 # A capability whose precondition does not exist yet (no app deployment, no prod-tier environment, a runbook not due
 # yet) is skipped with the reason, not failed: a new system's first builds run every check. Only facts skip a check;
 # once the precondition exists, the check proves or fails.
@@ -222,7 +225,7 @@ $checks = [ordered] @{
         "one image per version: $($shown -join ', ')"
     }
     'CAP-021' = { $v = (Get-LastDeployment $deployableProject $first).Version; $w = az acr repository show --name $system.azure.registry.name --image "$($slug)/${deployable}:$v" --query 'changeableAttributes.writeEnabled' --output tsv; Assert-That ($w -eq 'false') "$v is writable"; "$($slug)/${deployable}:$v is write-locked" }
-    'CAP-030' = { $l = @((Invoke-Octopus "/api/$space/lifecycles?partialName=$($slug)-lifecycle&take=100").Items | Where-Object { $_.Name -eq "$($slug)-lifecycle" })[0]; Assert-That (@($l.Phases[0].AutomaticDeploymentTargets).Count -eq 1 -and @($l.Phases | Select-Object -Skip 1 | Where-Object { $_.AutomaticDeploymentTargets.Count -gt 0 }).Count -eq 0) 'lifecycle phases wrong'; "first phase automatic, $($l.Phases.Count - 1) by promotion" }
+    'CAP-030' = { $l = (Invoke-Octopus "/api/$space/lifecycles?partialName=$($slug)-lifecycle&take=100").Items | Where-Object { $_.Name -eq "$($slug)-lifecycle" } | Select-Object -First 1; Assert-That ($null -ne $l) "no lifecycle $slug-lifecycle"; Assert-That (@($l.Phases[0].AutomaticDeploymentTargets).Count -eq 1 -and @($l.Phases | Select-Object -Skip 1 | Where-Object { $_.AutomaticDeploymentTargets.Count -gt 0 }).Count -eq 0) 'lifecycle phases wrong'; "first phase automatic, $($l.Phases.Count - 1) by promotion" }
     'CAP-031' = {
         # What the pipeline creates, where it is recorded: the cluster's stack, the Argo CD instance Octopus knows (one,
         # healthy), the worker in the cluster, and per environment its Octopus environment, its registration with the
@@ -266,8 +269,8 @@ $checks = [ordered] @{
         $team = @((Invoke-Octopus "/api/$space/teams?partialName=$([uri]::EscapeDataString($teamName))&take=100").Items | Where-Object { $_.Name -eq $teamName -and $_.SpaceId -eq $space }) | Select-Object -First 1
         Assert-That ($null -ne $team) "no team '$teamName' in the space"
         foreach ($project in $systemProject, $deployableProject) {
-            $s = @(Get-ProcessStep $project)[0]
-            Assert-That ($s.Name -eq 'Sign-off' -and $s.Actions[0].ActionType -eq 'Octopus.Manual') "$project does not start with Sign-off"
+            $s = Get-ProcessStep $project | Select-Object -First 1
+            Assert-That ($null -ne $s -and $s.Name -eq 'Sign-off' -and $s.Actions[0].ActionType -eq 'Octopus.Manual') "$project does not start with Sign-off"
             $responsible = $s.Actions[0].Properties.PSObject.Properties['Octopus.Action.Manual.ResponsibleTeamIds']
             $responsibleIds = if ($responsible) { [string] $responsible.Value } else { '' }
             Assert-That ($responsibleIds -eq $team.Id) "the Sign-off of $project is for '$responsibleIds', not for team '$teamName' ($($team.Id))"

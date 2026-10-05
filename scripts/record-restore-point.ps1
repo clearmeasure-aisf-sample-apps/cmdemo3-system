@@ -47,7 +47,7 @@ while ($true) {
     Start-Sleep -Seconds 10
 }
 $log = @(kubectl logs "job/$job" --namespace $namespace --container backup --tail 40)
-$backup = (@($log | Where-Object { $_ -match '^db-backup: (\S+)$' })[-1] -replace '^db-backup: ', '')
+$backup = ([string] ($log | Where-Object { $_ -match '^db-backup: (\S+)$' } | Select-Object -Last 1)) -replace '^db-backup: ', ''
 if (-not $backup) {
     Fail-Step "Job $job succeeded but did not name its backup."
 }

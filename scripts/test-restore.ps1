@@ -42,8 +42,8 @@ while ($true) {
     Start-Sleep -Seconds 10
 }
 $log = @(kubectl logs "job/$job" --namespace $namespace --container restore-test --tail 40)
-$tables = @($log | Where-Object { $_ -match '^db-restore-test: \d+ tables restored' })[-1]
-$source = @($log | Where-Object { $_ -match '^db-restore-test: https://' })[-1]
+$tables = $log | Where-Object { $_ -match '^db-restore-test: \d+ tables restored' } | Select-Object -Last 1
+$source = $log | Where-Object { $_ -match '^db-restore-test: https://' } | Select-Object -Last 1
 if (-not $tables -or -not $source) {
     Fail-Step "Job $job succeeded but did not report what it restored."
 }

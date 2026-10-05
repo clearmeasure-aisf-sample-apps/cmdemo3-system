@@ -81,7 +81,7 @@ if (Test-HelmRelease -Name $gatewayName -Namespace $gatewayNamespace) {
     # Registered before. The environments of the instance follow system.json (a new environment is a pull request
     # that adds it there). The provider has no resource for the instance, so this is the REST API: the instances are
     # listed as summaries, and a POST to the gateway changes it.
-    $gateway = @((Invoke-RestMethod -Uri "$octopusUrl/api/$spaceId/argocdinstances/summaries" -Headers $headers).Resources | Where-Object { $_.Name -eq $gatewayName })[0]
+    $gateway = (Invoke-RestMethod -Uri "$octopusUrl/api/$spaceId/argocdinstances/summaries" -Headers $headers).Resources | Where-Object { $_.Name -eq $gatewayName } | Select-Object -First 1
     if (-not $gateway) { throw "The gateway's Helm release exists, but Octopus lists no Argo CD instance named $gatewayName in $spaceId." }
     $wanted = @((Invoke-RestMethod -Uri "$octopusUrl/api/$spaceId/environments/all" -Headers $headers) | Where-Object { $environments -contains $_.Slug } | ForEach-Object { [string] $_.Id } | Sort-Object)
     if (($wanted -join ',') -ne ((@($gateway.EnvironmentIds) | Sort-Object) -join ',')) {
