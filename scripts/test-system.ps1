@@ -65,10 +65,11 @@ foreach ($key in 'name', 'nodeSize', 'domain', 'ingressIp', 'ingressPublicIpName
 Test-Rule 'cluster.nodeCount' ($cluster['nodeCount'] -is [long] -and $cluster.nodeCount -ge 1 -and $cluster.nodeCount -le 5) '1 to 5 nodes'
 Test-Rule 'sql.edition' ($system.ContainsKey('sql') -and @('Express', 'Developer') -ccontains [string] $system.sql['edition']) 'Express or Developer'
 Test-Rule 'cluster resource group' (-not [string]::IsNullOrWhiteSpace([string] $system.azure.resourceGroups['cluster']))
-foreach ($identity in 'cluster', 'aks', 'kubelet', 'feed') {
+foreach ($identity in 'cluster', 'aks', 'kubelet', 'feed', 'backup') {
     Test-Rule "identity $identity" ($system.azure.identities.ContainsKey($identity)) 'the seed creates it; run phase 2 again'
 }
 
+Test-Rule 'backup storage' ($system.azure.ContainsKey('backup') -and -not [string]::IsNullOrWhiteSpace([string] $system.azure.backup['storageAccount']) -and -not [string]::IsNullOrWhiteSpace([string] $system.azure.backup['container'])) 'azure.backup.storageAccount and container: the seed creates them; run phase 2 again'
 $deployableNames = @($system.deployables | ForEach-Object { [string] $_.name })
 Test-Rule 'deployables present' ($deployableNames.Count -gt 0)
 foreach ($name in $deployableNames) {

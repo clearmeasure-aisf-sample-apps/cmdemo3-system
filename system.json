@@ -95,7 +95,16 @@
         "clientId": "99100eed-a607-47a3-82e8-28b1f2407253",
         "name": "id-cmdemo3-plan",
         "principalId": "e7c782a7-523e-4fb1-8cf5-5bc9fc8a695d"
+      },
+      "backup": {
+        "clientId": "c0294625-9306-4be1-bb00-8caa4f2cecf3",
+        "name": "id-cmdemo3-backup",
+        "principalId": "22d83247-f21c-4da6-9fe5-e336bdd8c17e"
       }
+    },
+    "backup": {
+      "container": "sql-backups",
+      "storageAccount": "stcmdemo3bkj6lijq"
     }
   },
   "octopus": {

@@ -23,8 +23,14 @@ locals {
   # The values the manifest templates of gitops/templates/environment take (step "Apply environment").
   template_variables = flatten([
     { key = "system-sql-edition", project = octopusdeploy_project.system.id, name = "Sql.Edition", value = local.system.sql.edition, environment = null },
+    # The backup jobs (gitops/templates/environment/backup.yaml): where they write, and who they sign in as.
+    { key = "system-backup-account", project = octopusdeploy_project.system.id, name = "Backup.StorageAccount", value = local.system.azure.backup.storageAccount, environment = null },
+    { key = "system-backup-container", project = octopusdeploy_project.system.id, name = "Backup.Container", value = local.system.azure.backup.container, environment = null },
+    { key = "system-backup-client", project = octopusdeploy_project.system.id, name = "Backup.ClientId", value = local.system.azure.identities.backup.clientId, environment = null },
     [for name, e in local.environments : [
       { key = "system-tier-${name}", project = octopusdeploy_project.system.id, name = "Environment.Tier", value = e.tier, environment = name },
+      # The nightly backups start ten minutes apart, in the order of the environments.
+      { key = "system-backup-minute-${name}", project = octopusdeploy_project.system.id, name = "Backup.Minute", value = tostring((e.sort_order * 10) % 60), environment = name },
       { key = "system-cpu-${name}", project = octopusdeploy_project.system.id, name = "App.CpuLimit", value = "${floor(tonumber(try(e.appCpu, "0.5")) * 1000)}m", environment = name },
       { key = "system-memory-${name}", project = octopusdeploy_project.system.id, name = "App.MemoryLimit", value = local.app_memory[try(e.appCpu, "0.5")], environment = name },
     ]],

@@ -51,8 +51,9 @@ locals {
   # templates/system: the people in system.json octopus.approvers; automation answers only with a recorded reason).
   first_environment = local.system.environments[0].name
   # Deployment freezes from system.json: [{ "name", "start", "end", "environments" (default: the prod tier) }].
-  freezes           = try(local.system.freezes, [])
-  prod_environments = [for name, e in local.environments : name if e.tier == "prod"]
+  freezes              = try(local.system.freezes, [])
+  prod_environments    = [for name, e in local.environments : name if e.tier == "prod"]
+  nonprod_environments = [for name, e in local.environments : name if e.tier != "prod"]
   # environments[].appCpu (0.5, 1, 1.5 or 2 vCPU) is the app container's CPU limit; its memory limit is twice that in GiB.
   app_memory = { "0.5" = "1Gi", "1" = "2Gi", "1.5" = "3Gi", "2" = "4Gi" }
 }

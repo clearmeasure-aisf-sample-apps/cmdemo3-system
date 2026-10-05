@@ -81,6 +81,11 @@ jobs:
         shell: pwsh
         run: ./scripts/keep-queued-tasks.ps1
 
+      # Scheduled runbooks run their published snapshot, which Terraform does not create.
+      - name: Publish runbooks
+        shell: pwsh
+        run: ./scripts/publish-runbooks.ps1 -Name "run ${{ github.run_number }}.${{ github.run_attempt }}"
+
   cluster-apply:
     needs: octopus-apply
     runs-on: ubuntu-latest
