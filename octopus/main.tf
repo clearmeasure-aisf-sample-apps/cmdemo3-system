@@ -188,12 +188,13 @@ locals {
     "Octopus.Action.Script.Syntax"       = "PowerShell"
     "OctopusUseBundledTooling"           = "False"
   }
-  # Both Argo CD steps: commit to main, ask Argo CD to sync, and succeed only when Argo CD reports the Application in
-  # sync with that commit and healthy.
+  # Both Argo CD steps: commit to main, and succeed only when Argo CD reports the Application in sync with that commit
+  # and healthy. No "Trigger Sync": Octopus documents it for Applications whose auto-sync is off, and ours sync
+  # themselves (within a minute: timeout.reconciliation in cluster/argocd-values.yaml). Triggered as well, the
+  # step's sync can meet the one Argo CD started and fail with "another operation is already in progress".
   argo_properties = {
     "Octopus.Action.RunOnServer"                     = "true"
     "Octopus.Action.ArgoCD.CommitMethod"             = "DirectCommit"
-    "Octopus.Action.ArgoCD.Sync.Mode"                = "AllEnvironments"
     "Octopus.Action.ArgoCD.StepVerification.Method"  = "ArgoCDApplicationHealthy"
     "Octopus.Action.ArgoCD.StepVerification.Timeout" = "900"
     "Octopus.Action.ArgoCD.CommitMessageDescription" = "Project: #{Octopus.Project.Slug}\nEnvironment: #{Octopus.Environment.Slug}\nDeployment: #{Octopus.Deployment.Id}"
