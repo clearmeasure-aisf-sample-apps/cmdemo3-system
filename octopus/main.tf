@@ -47,10 +47,9 @@ locals {
     for name, d in local.migrated_deployables : name => d
     if try(d.acceptanceTestsPackage, "") != "" && try(d.dataLoaderAssembly, "") != ""
   }
-  # Every environment after the first waits for a sign-off by the space's Space Managers (people join that team to
-  # sign off; automation answers only with a recorded reason).
+  # Every environment after the first waits for a sign-off by the team "<slug> approvers" (approvers.tf, shared with
+  # templates/system: the people in system.json octopus.approvers; automation answers only with a recorded reason).
   first_environment = local.system.environments[0].name
-  sign_off_team_id  = "teams-spacemanagers-${local.system.octopus.spaceId}"
   # Deployment freezes from system.json: [{ "name", "start", "end", "environments" (default: the prod tier) }].
   freezes           = try(local.system.freezes, [])
   prod_environments = [for name, e in local.environments : name if e.tier == "prod"]

@@ -30,7 +30,22 @@ resource contributors 'Microsoft.Authorization/roleAssignments@2022-04-01' = [
       principalId: principalId
       principalType: 'ServicePrincipal'
       roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b24988ac-6180-42a0-ab88-20f7382dd24c') // Contributor
-      description: 'Deploy identity of a tier of ${slug}: its environments\' Front Door endpoints (stack-${slug}-<env>-edge)'
+      // No angle brackets: Azure refuses a description that looks like an HTML tag.
+      description: 'Deploy identity of a tier of ${slug}: the Front Door endpoints of its environments (their edge stacks)'
+    }
+  }
+]
+
+// Contributor leaves out Microsoft.Resources/deploymentStacks/manageDenySetting/action, which a stack with deny settings
+// needs (DeploymentStackActionForbidden on cmdemo2's first edge stack): the built-in role for stacks adds it.
+resource stackOwners 'Microsoft.Authorization/roleAssignments@2022-04-01' = [
+  for principalId in deployPrincipalIds: {
+    name: guid(resourceGroup().id, principalId, 'adb29209-aa1d-457b-a786-c913953d2891')
+    properties: {
+      principalId: principalId
+      principalType: 'ServicePrincipal'
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'adb29209-aa1d-457b-a786-c913953d2891') // Azure Deployment Stack Owner
+      description: 'Deploy identity of a tier of ${slug}: the deny settings of its environments\' edge stacks'
     }
   }
 ]

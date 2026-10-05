@@ -23,8 +23,8 @@ follows from it.
    Manifests) fills the templates of `gitops/templates/environment` and commits them to
    `gitops/environments/<env>/system`; Argo CD applies the commit, and the step waits until Argo CD reports the
    Application in sync and healthy.
-4. A person promotes the release to the next environment in Octopus and signs it off; the same commit's templates are
-   applied there.
+4. A person promotes the release to the next environment in Octopus, and a member of the team `<slug> approvers`
+   (`system.json` `octopus.approvers`) signs it off; the same commit's templates are applied there.
 
 An app release (`<slug>-<deployable>`, created by the app repository's release workflow) migrates the database on the
 Kubernetes worker in the cluster, then step "Update deployable" (Update Argo CD Application Image Tags) commits the
