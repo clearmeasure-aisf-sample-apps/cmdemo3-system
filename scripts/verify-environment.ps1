@@ -29,6 +29,9 @@ $slug = [string] $OctopusParameters['System.Slug']
 $domain = [string] $OctopusParameters['Cluster.Domain']
 $only = [string] $OctopusParameters['Deployable.Name']
 $release = [string] $OctopusParameters['Octopus.Release.Number']
+# The tag the deployment pins: the image's package version (usually, not always, the release number).
+$wantedTag = if ($only) { [string] $OctopusParameters["Octopus.Action[Update deployable].Package[$only].PackageVersion"] } else { '' }
+if (-not $wantedTag) { $wantedTag = $release }
 $namespace = "$slug-$environmentName"
 $baseUrl = "https://$slug-$environmentName.$domain"
 $deadline = (Get-Date).AddMinutes(15)
@@ -80,7 +83,7 @@ foreach ($deployable in $deployables) {
             $available = $status.PSObject.Properties['availableReplicas'] ? [int] $status.availableReplicas : 0
             $total = $status.PSObject.Properties['replicas'] ? [int] $status.replicas : 0
             $rolledOut = $updated -eq $wanted -and $available -eq $wanted -and $total -eq $wanted
-            if ($rolledOut -and (-not $only -or $tag -eq $release)) {
+            if ($rolledOut -and (-not $only -or $tag -eq $wantedTag)) {
                 $path = if ($tag -eq '0.0.0-placeholder') { '/' } else { [string] $deployable.healthPath }
                 break
             }
@@ -88,7 +91,7 @@ foreach ($deployable in $deployables) {
         $problem = Get-PodProblem -Selector "app.kubernetes.io/name=$name"
         if ($problem) { Fail-Step "$name of $environmentName cannot start: $problem" }
         if ((Get-Date) -gt $deadline) {
-            Fail-Step "$name of $environmentName did not roll out$(if ($only) { " version $release" }) (Deployment $name in $namespace)."
+            Fail-Step "$name of $environmentName did not roll out$(if ($only) { " image tag $wantedTag" }) (Deployment $name in $namespace)."
         }
         Start-Sleep -Seconds 10
     }
