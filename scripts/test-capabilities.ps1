@@ -190,6 +190,15 @@ $checks = [ordered] @{
         if ($checked.Count -eq 0) { Skip-Check "no successful $deployableProject deployment yet" }
         "newTag in Git equals the deployed release in $($checked -join ', ')"
     }
+    'CAP-005' = {
+        # After a failed deployment Git names the version that runs: step "Revert pin" runs only on failure and commits
+        # the previous tag back (test-failed-deployment.ps1 proves it with a release that cannot start).
+        $step = @(Get-ProcessStep $deployableProject | Where-Object Name -eq 'Revert pin')
+        Assert-That ($step.Count -eq 1 -and $step[0].Condition -eq 'Failure') 'no Revert pin on failure'
+        $names = @(Get-ProcessStep $deployableProject | ForEach-Object Name)
+        Assert-That ($names.IndexOf('Revert pin') -gt $names.IndexOf('Update deployable')) 'Revert pin stands before Update deployable'
+        'Revert pin runs on failure, after Update deployable'
+    }
     'CAP-010' = { Assert-AppRepository; Assert-That ((Get-RequiredCheck $appRepo) -contains 'Build result') 'Build result not required'; 'Build result required on the app' }
     'CAP-011' = { $noisy = @(Get-NoisyDeployment); Assert-That ($noisy.Count -eq 0) "warnings in: $($noisy -join '; ')"; 'the current deployment of every project and environment logged no warning or error' }
     'CAP-012' = {
@@ -270,6 +279,15 @@ $checks = [ordered] @{
         'app sizes in Git follow system.json'
     }
     'CAP-034' = { $n = @(Get-ProcessStep $deployableProject | ForEach-Object Name); Assert-That ($n.IndexOf('Migrate database') -ge 0 -and $n.IndexOf('Migrate database') -lt $n.IndexOf('Update deployable')) 'Update before Migrate'; 'Migrate database before Update deployable' }
+    'CAP-035' = {
+        # Fail fast with the reason: the image step gives a rollout five minutes, and the steps after it name the pod's
+        # reason (Verify deployable while it waits, Revert pin after a failure).
+        $update = @(Get-ProcessStep $deployableProject | Where-Object Name -eq 'Update deployable')[0]
+        $timeout = $update.Actions[0].Properties.PSObject.Properties['Octopus.Action.ArgoCD.StepVerification.Timeout']
+        Assert-That ($null -ne $timeout -and [int] [string] $timeout.Value -le 300) "Update deployable waits $(if ($timeout) { $timeout.Value } else { 'without a limit' }) seconds for a healthy rollout"
+        foreach ($f in 'verify-environment.ps1', 'revert-pin.ps1') { Assert-That ((Get-RepoFile $systemRepo "scripts/$f") -match 'Get-PodProblem') "$f does not name the reason a pod cannot start" }
+        "a rollout that is not healthy in $($timeout.Value) s fails, and Verify and Revert pin name the pod's reason"
+    }
     'CAP-036' = { Assert-That (@(Get-ProcessStep $systemProject | Where-Object Name -eq 'Verify environment').Count -eq 1 -and @(Get-ProcessStep $deployableProject | Where-Object Name -eq 'Verify deployable').Count -eq 1) 'a verify step is missing'; 'both projects end with a verify step' }
     'CAP-037' = {
         # test-rollback.ps1 redeploys the previous release and then the current one: the first environment's history
@@ -302,6 +320,23 @@ $checks = [ordered] @{
     'CAP-041' = { $d = Get-LastDeployment $deployableProject $first; Assert-That ($d.Log -match 'test data was reloaded') 'no ZDataLoader'; "test data reloaded after $($d.Version)" }
     'CAP-042' = { $d = Get-LastDeployment $deployableProject $first; $m = [regex]::Match($d.Log, 'effective parallelism ([\d.]+)'); Assert-That $m.Success 'no parallelism reported'; "effective parallelism $($m.Groups[1].Value)" }
     'CAP-043' = { $d = Get-LastDeployment $deployableProject $first; $a = @((Invoke-Octopus "/api/$space/artifacts?regarding=$($d.TaskId)").Items | Where-Object Filename -like '*.trx'); Assert-That ($a.Count -ge 1) 'no TRX artifact'; "$($a[0].Filename)" }
+    'CAP-044' = {
+        # Every current deployment that ran step "Measure availability" logged no downtime.
+        $measured = 0
+        foreach ($project in $systemProject, $deployableProject) {
+            foreach ($e in $environments) {
+                $deployment = Find-LastDeployment $project $e
+                if (-not $deployment) { continue }
+                $lines = @($deployment.Log -split "`n" | Where-Object { $_ -match 'Availability of ' })
+                if ($lines.Count -eq 0) { continue }
+                $down = @($lines | Where-Object { $_ -match 'downtime period' })
+                if ($down.Count -gt 0) { throw "$project $($deployment.Version) in ${e}: $($down[0])" }
+                $measured++
+            }
+        }
+        if ($measured -eq 0) { Skip-Check 'no current deployment has measured availability yet' }
+        "$measured current deployments measured, no downtime"
+    }
     'CAP-046' = {
         # Every environment's address is a host name on the cluster's one public address, which the seed created as a
         # static address outside the cluster's stack: pods, nodes and the cluster itself change behind it. Each address
@@ -346,6 +381,15 @@ $checks = [ordered] @{
     }
     'CAP-053' = { $u = az account show --query user.type --output tsv; $me = Invoke-Octopus '/api/users/me'; Assert-That ($u -eq 'servicePrincipal' -and $me.IsService) "az $u, Octopus service $($me.IsService)"; "az as a service principal, Octopus as $($me.Username)" }
     'CAP-055' = { Assert-AppRepository; Assert-That ((Get-RequiredCheck $appRepo) -contains 'secret-scan' -and (Get-RepoFile $systemRepo '.github/workflows/env-checks.yml') -match 'gitleaks') 'secret scanning not enforced'; 'gitleaks in env-checks and the required check secret-scan' }
+    'CAP-056' = {
+        # Runbook "Rotate SQL passwords" ran in every environment in the last 35 days (it runs monthly).
+        Assert-Awake
+        $runs = @(Get-RecentRun 'Rotate SQL passwords' 35)
+        $rotated = @($environments | Where-Object { $e = $_; @($runs | Where-Object { $_.Description -like "* on $e" -or $_.Description -like "* on $e *" }).Count -gt 0 })
+        $missing = @($environments | Where-Object { $rotated -notcontains $_ })
+        Assert-That ($missing.Count -eq 0) "no successful rotation in 35 days in $($missing -join ', ')"
+        "SQL passwords rotated in the last 35 days in $($rotated -join ', ')"
+    }
     'CAP-060' = {
         # The weekly restore test restores the environment's latest backup, whose name carries the time it was taken:
         # a test that passed on a backup older than a day and a half means the nightly backup did not run.

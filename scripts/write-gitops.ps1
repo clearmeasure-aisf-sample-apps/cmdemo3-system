@@ -387,10 +387,19 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: $namespace
+  # Runbook "Rotate SQL passwords" restarts the Deployment (kubectl rollout restart) so the app reads its new
+  # password; the restart's annotation is not a difference to repair.
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jqPathExpressions:
+        - .spec.template.metadata.annotations."kubectl.kubernetes.io/restartedAt"
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
+    syncOptions:
+      - RespectIgnoreDifferences=true
     retry:
       limit: 5
       backoff:

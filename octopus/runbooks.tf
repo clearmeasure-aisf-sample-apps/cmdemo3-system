@@ -1,5 +1,6 @@
 # Operations runbooks of <slug>-system (runtime aks-argocd):
-#   Restore test   weekly, first environment: the latest backup restored into a temporary database (CAP-060)
+#   Restore test           weekly, first environment: the latest backup restored into a temporary database (CAP-060)
+#   Rotate SQL passwords   monthly, every environment: new passwords for the app's login and sa (CAP-056)
 # A schedule runs the runbook's published snapshot; the system workflow publishes one after every apply.
 # The instance's task cap is shared by every system on it, so each system's schedule starts at its own time: an offset
 # of 0 to 239 minutes derived from the slug (the same on every apply), after 09:00 UTC, when the nightly backups exist.
@@ -14,6 +15,15 @@ locals {
       environments = [local.first_environment]
       cron         = "0 ${local.schedule_offset % 60} ${9 + floor(local.schedule_offset / 60)} * * Sun"
       schedule     = "Weekly restore test"
+    }
+    rotate_sql_passwords = {
+      name         = "Rotate SQL passwords"
+      description  = "Gives the environment's SQL Server new passwords for the app's login and sa, restarts the apps with theirs and checks they answer (scripts/rotate-sql-passwords.ps1)."
+      script       = "rotate-sql-passwords.ps1"
+      environments = keys(local.environments)
+      # The first of the month, an hour after the restore test's time of day.
+      cron     = "0 ${local.schedule_offset % 60} ${10 + floor(local.schedule_offset / 60)} 1 * *"
+      schedule = "Monthly SQL password rotation"
     }
   }
 }
