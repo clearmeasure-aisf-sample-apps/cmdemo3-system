@@ -8,3 +8,4 @@ namespace: "cmdemo3-prod"
 resources:
   - namespace.yaml
   - db.yaml
+  - backup.yaml
