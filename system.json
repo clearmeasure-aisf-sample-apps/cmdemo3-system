@@ -136,7 +136,7 @@
     {
       "name": "uat",
       "tier": "nonprod",
-      "appCpu": "0.5"
+      "appCpu": "1"
     },
     {
       "name": "prod",
