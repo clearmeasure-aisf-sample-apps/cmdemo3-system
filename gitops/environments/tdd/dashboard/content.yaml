@@ -14,7 +14,7 @@ data:
         "repository": "https://github.com/clearmeasure-aisf-sample-apps/cmdemo3-system",
         "deliveryUrl": "https://raw.githubusercontent.com/clearmeasure-aisf-sample-apps/cmdemo3-system/status/delivery.json"
       },
-      "generated": "2026-10-06T18:48:27Z",
+      "generated": "2026-10-06T18:58:44Z",
       "environments": [
         {
           "name": "tdd",
@@ -158,7 +158,7 @@ data:
     }
   runtime-index.json: |
     {
-      "generated": "2026-10-06T18:48:27Z",
+      "generated": "2026-10-06T18:58:44Z",
       "plantuml": "1.2026.8",
       "environments": [
         {
@@ -250,7 +250,7 @@ data:
           "kind": "dashboard"
         }
       ],
-      "generated": "2026-10-06T18:48:27Z",
+      "generated": "2026-10-06T18:58:44Z",
       "plantuml": "1.2026.8"
     }
   runtime-prod.puml: |
@@ -364,7 +364,7 @@ data:
           "kind": "dashboard"
         }
       ],
-      "generated": "2026-10-06T18:48:27Z",
+      "generated": "2026-10-06T18:58:44Z",
       "plantuml": "1.2026.8"
     }
   runtime-tdd.puml: |
@@ -478,7 +478,7 @@ data:
           "kind": "dashboard"
         }
       ],
-      "generated": "2026-10-06T18:48:27Z",
+      "generated": "2026-10-06T18:58:44Z",
       "plantuml": "1.2026.8"
     }
   runtime-uat.puml: |
