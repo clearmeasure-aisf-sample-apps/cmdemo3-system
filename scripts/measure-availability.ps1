@@ -36,7 +36,13 @@ $release = [string] $OctopusParameters['Octopus.Release.Number']
 $tag = if ($only) { [string] $OctopusParameters["Octopus.Action[Update deployable].Package[$only].PackageVersion"] } else { '' }
 if (-not $tag) { $tag = $release }
 $namespace = "$slug-$environmentName"
-$baseUrl = "https://$slug-$environmentName.$domain"
+# A deployable's public address: the first one has the environment's own host name, every other one
+# <slug>-<env>-<name> (System.Deployables hostSuffix; a release from before the field has only the first).
+function Get-BaseUrl {
+    param($Deployable)
+    $suffix = $Deployable.PSObject.Properties['hostSuffix'] ? [string] $Deployable.hostSuffix : ''
+    "https://$slug-$environmentName$suffix.$domain"
+}
 $deployables = @(([string] $OctopusParameters['System.Deployables']) | ConvertFrom-Json | Where-Object { -not $only -or $_.name -eq $only })
 $started = Get-Date
 $deadline = $started.AddMinutes($(if ($only) { 7 } else { 15 }))
@@ -106,7 +112,7 @@ while ($true) {
         # The placeholder image of a new environment has no health path: its page answers on /.
         $path = if ($mine.Count -eq 1 -and $mine[0].Tag -eq '0.0.0-placeholder') { '/' } else { [string] $deployable.healthPath }
         $failure = ''
-        $status = try { [int] (Invoke-WebRequest -Uri "$baseUrl$path" -TimeoutSec 10 -SkipHttpErrorCheck).StatusCode } catch { $failure = $_.Exception.Message; 0 }
+        $status = try { [int] (Invoke-WebRequest -Uri "$(Get-BaseUrl $deployable)$path" -TimeoutSec 10 -SkipHttpErrorCheck).StatusCode } catch { $failure = $_.Exception.Message; 0 }
         $samples.Add([pscustomobject] @{ Tick = $tick; Time = Get-Date; Deployable = $name; Status = $status; Failure = $failure })
     }
     Start-Sleep -Seconds 3

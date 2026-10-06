@@ -33,7 +33,13 @@ $release = [string] $OctopusParameters['Octopus.Release.Number']
 $wantedTag = if ($only) { [string] $OctopusParameters["Octopus.Action[Update deployable].Package[$only].PackageVersion"] } else { '' }
 if (-not $wantedTag) { $wantedTag = $release }
 $namespace = "$slug-$environmentName"
-$baseUrl = "https://$slug-$environmentName.$domain"
+# A deployable's public address: the first one has the environment's own host name, every other one
+# <slug>-<env>-<name> (System.Deployables hostSuffix; a release from before the field has only the first).
+function Get-BaseUrl {
+    param($Deployable)
+    $suffix = $Deployable.PSObject.Properties['hostSuffix'] ? [string] $Deployable.hostSuffix : ''
+    "https://$slug-$environmentName$suffix.$domain"
+}
 $deadline = (Get-Date).AddMinutes(15)
 $deployables = @(([string] $OctopusParameters['System.Deployables']) | ConvertFrom-Json | Where-Object { -not $only -or $_.name -eq $only })
 if ($deployables.Count -eq 0) {
@@ -96,7 +102,7 @@ foreach ($deployable in $deployables) {
         Start-Sleep -Seconds 10
     }
 
-    $url = "$baseUrl$path"
+    $url = "$(Get-BaseUrl $deployable)$path"
     $reason = ''
     while ($true) {
         try {

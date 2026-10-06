@@ -36,7 +36,8 @@ $database = [string] $OctopusParameters['Database.Name']
 $login = [string] $OctopusParameters['Database.AppLogin']
 $namespace = "$slug-$environmentName"
 $server = "db.$namespace.svc.cluster.local"
-$deployables = @(([string] $OctopusParameters['System.Deployables']) | ConvertFrom-Json)
+# The apps that hold the database login: not a static site (hosting "staticsite"), which has no connection string.
+$deployables = @(([string] $OctopusParameters['System.Deployables']) | ConvertFrom-Json | Where-Object { -not $_.PSObject.Properties['hosting'] -or [string] $_.hosting -ne 'staticsite' })
 
 function New-Password {
     # Letters and digits only: safe inside SQL and a connection string. SQL Server wants three character classes.
@@ -138,7 +139,8 @@ Write-Host 'sa has a new password; SQL Server accepts it.'
 
 # 3. The apps answer again.
 foreach ($deployable in $deployables) {
-    $url = "https://$slug-$environmentName.$domain$([string] $deployable.healthPath)"
+    $suffix = $deployable.PSObject.Properties['hostSuffix'] ? [string] $deployable.hostSuffix : ''
+    $url = "https://$slug-$environmentName$suffix.$domain$([string] $deployable.healthPath)"
     $deadline = (Get-Date).AddMinutes(3)
     while ([int] (Invoke-WebRequest -Uri $url -TimeoutSec 20 -SkipHttpErrorCheck).StatusCode -ne 200) {
         if ((Get-Date) -gt $deadline) { Fail-Step "$url does not answer 200 after the rotation." }

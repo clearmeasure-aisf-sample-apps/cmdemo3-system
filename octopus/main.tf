@@ -33,6 +33,12 @@ locals {
   environments   = { for i, e in local.system.environments : e.name => merge(e, { sort_order = i + 1 }) }
   deployables    = { for d in local.system.deployables : d.name => d }
 
+  # A deployable with hosting "staticsite" is a static site (the health dashboard): a web server at its own host name,
+  # whose per-environment content step "Write dashboard content" commits to Git. Every other one is an app.
+  static_deployables = { for name, d in local.deployables : name => d if try(d.hosting, "") == "staticsite" }
+  # The first deployable answers at <slug>-<env>.<domain>, every other one at <slug>-<env>-<name>.<domain>.
+  host_suffix = { for i, d in local.system.deployables : d.name => i == 0 ? "" : "-${d.name}" }
+
   # Only deployables with a databasePackage own the database: they migrate it.
   migrated_deployables = { for name, d in local.deployables : name => d if try(d.databasePackage, "") != "" }
   # Environments whose app deployments run the acceptance tests (system.json environments[].acceptanceTests), and the

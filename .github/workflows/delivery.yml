@@ -1,0 +1,77 @@
+# Delivery facts for the health dashboard (runtime aks-argocd): scripts/write-delivery.ps1 reads, per environment and deployable, the release
+# of the last successful deployment, who signed it off and why, the commit it was built from and the lead time, how far
+# the environment is behind the first one, the deployments of the last seven days and the last measured failover. The
+# result is delivery.json, the only file of branch "status": one commit, replaced (force-pushed) by every run that
+# finds a change, so main gets no commits and the branch no history. The dashboard reads it from the browser at
+# https://raw.githubusercontent.com/<org>/<repository>/status/delivery.json (the repository is public).
+# It runs when Octopus writes to an environment (every deployment commits under gitops/environments/<env>/), hourly,
+# and on demand. The commit comes in the middle of its deployment, so the script first waits for running deployments.
+# Credentials: GitHub OIDC to Octopus as the system's service account (environment "capabilities", read-only use), and
+# this workflow's own token to read the commits and to push the branch. No stored secret.
+name: delivery
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "gitops/environments/**"
+  schedule:
+    - cron: "37 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: delivery
+  cancel-in-progress: false
+
+jobs:
+  delivery:
+    runs-on: ubuntu-24.04
+    environment: capabilities
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6.0.1
+
+      - name: Sign in to Octopus
+        uses: OctopusDeploy/login@v2
+        with:
+          server: ${{ vars.OCTOPUS_URL }}
+          service_account_id: ${{ vars.OCTOPUS_SERVICE_ACCOUNT_ID }}
+
+      - name: Write delivery.json
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/write-delivery.ps1 -Path "${{ runner.temp }}/delivery.json" -WaitMinutes 30
+
+      # One commit without a parent, made from the file alone (no checkout of the branch), as github-actions[bot] with
+      # the token the checkout step kept. Skipped when only the time of generation differs from what is published.
+      - name: Publish on branch status
+        env:
+          DELIVERY: ${{ runner.temp }}/delivery.json
+          PUBLISHED: ${{ runner.temp }}/published.json
+          GIT_AUTHOR_NAME: "github-actions[bot]"
+          GIT_AUTHOR_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
+          GIT_COMMITTER_NAME: "github-actions[bot]"
+          GIT_COMMITTER_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
+        run: |
+          set -euo pipefail
+          facts() { jq --sort-keys 'del(.generated)' "$1"; }
+          if [ -n "$(git ls-remote --heads origin status)" ]; then
+            git fetch --quiet --depth=1 origin status
+            if git cat-file -e FETCH_HEAD:delivery.json 2>/dev/null; then
+              git show FETCH_HEAD:delivery.json > "$PUBLISHED"
+              if [ "$(facts "$DELIVERY")" = "$(facts "$PUBLISHED" 2>/dev/null || true)" ]; then
+                echo "delivery.json is unchanged: nothing to publish."
+                exit 0
+              fi
+            fi
+          fi
+          blob=$(git hash-object -w "$DELIVERY")
+          tree=$(printf '100644 blob %s\tdelivery.json\n' "$blob" | git mktree)
+          commit=$(git commit-tree "$tree" -m "Delivery facts of $(jq --raw-output .generated "$DELIVERY")")
+          git push --quiet --force origin "$commit:refs/heads/status"
+          echo "delivery.json published on branch status ($commit)."
