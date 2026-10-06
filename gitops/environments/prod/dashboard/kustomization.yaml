@@ -1,0 +1,12 @@
+# The version of dashboard in prod: step "Update deployable" of the Octopus project
+# cmdemo3-dashboard writes newTag. Do not edit it by hand; promote a release in Octopus.
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: cmdemo3-prod
+resources:
+  - ../system/apps/dashboard
+  - content.yaml
+images:
+  - name: acrcmdemo3q3zmsi.azurecr.io/cmdemo3/dashboard
+    newTag: 0.0.0-placeholder

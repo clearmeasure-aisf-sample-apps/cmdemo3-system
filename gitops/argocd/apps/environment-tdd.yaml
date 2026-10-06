@@ -78,3 +78,42 @@ spec:
         duration: 30s
         factor: 2
         maxDuration: 5m
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cmdemo3-dashboard-tdd
+  namespace: argocd
+  annotations:
+    argo.octopus.com/project: cmdemo3-dashboard
+    argo.octopus.com/environment: tdd
+    argo.octopus.com/default-container-registry: acrcmdemo3q3zmsi.azurecr.io
+    argocd.argoproj.io/manifest-generate-paths: .;../system/apps/dashboard
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/clearmeasure-aisf-sample-apps/cmdemo3-system.git
+    targetRevision: main
+    path: gitops/environments/tdd/dashboard
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cmdemo3-tdd
+  # Runbook "Rotate SQL passwords" restarts the Deployment (kubectl rollout restart) so the app reads its new
+  # password; the restart's annotation is not a difference to repair.
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jqPathExpressions:
+        - .spec.template.metadata.annotations."kubectl.kubernetes.io/restartedAt"
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - RespectIgnoreDifferences=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
