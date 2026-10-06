@@ -7,4 +7,516 @@ metadata:
   name: dashboard-content
 data:
   topology.json: |
-    { "environments": [] }
+    {
+      "system": {
+        "slug": "cmdemo3",
+        "name": "Clear Measure work orders demo 3 (AKS and Argo CD)",
+        "repository": "https://github.com/clearmeasure-aisf-sample-apps/cmdemo3-system",
+        "deliveryUrl": "https://raw.githubusercontent.com/clearmeasure-aisf-sample-apps/cmdemo3-system/status/delivery.json"
+      },
+      "generated": "2026-10-06T19:02:50Z",
+      "environments": [
+        {
+          "name": "tdd",
+          "tier": "nonprod",
+          "versionsUrl": null,
+          "versionsHistoryUrl": null,
+          "links": {
+            "applicationInsights": "https://portal.azure.com/#@40645332-2e20-4bca-882c-b2706f93ce44/resource/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo3-cluster/providers/microsoft.insights/components/appi-cmdemo3-tdd/overview",
+            "applicationMap": "https://portal.azure.com/#@40645332-2e20-4bca-882c-b2706f93ce44/resource/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo3-cluster/providers/microsoft.insights/components/appi-cmdemo3-tdd/applicationMap",
+            "resourceGroup": "https://portal.azure.com/#@40645332-2e20-4bca-882c-b2706f93ce44/resource/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo3-cluster/overview"
+          },
+          "deployables": [
+            {
+              "name": "ui",
+              "projectUrl": "https://clearmeasure.octopus.app/app#/Spaces-357/projects/cmdemo3-ui",
+              "frontDoor": null,
+              "healthPath": "/_healthcheck",
+              "alivePath": "/alive",
+              "versionPath": "/_version",
+              "telemetryPath": "/_telemetry",
+              "trafficPaths": [
+                "/",
+                "/api/work-orders/status-counts"
+              ],
+              "buildPath": "/_build",
+              "pinUrl": "https://raw.githubusercontent.com/clearmeasure-aisf-sample-apps/cmdemo3-system/main/gitops/environments/tdd/ui/kustomization.yaml",
+              "pinHistoryUrl": "https://github.com/clearmeasure-aisf-sample-apps/cmdemo3-system/commits/main/gitops/environments/tdd/ui/kustomization.yaml",
+              "links": {
+                "logs": "https://portal.azure.com/#@40645332-2e20-4bca-882c-b2706f93ce44/blade/Microsoft_Azure_Monitoring_Logs/LogsBlade/resourceId/%2Fsubscriptions%2F4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69%2FresourceGroups%2Frg-cmdemo3-cluster%2Fproviders%2Fmicrosoft.insights%2Fcomponents%2Fappi-cmdemo3-tdd/source/LogsBlade.AnalyticsShareLinkToQuery/q/H4sIAAAAAAAAA03OPWrEMBQE4N6nGLaSQCmWxcUWPkCKpMgFglYaE4F%2BnPcklgQffjEkIe0w3zDCz0HtOu24f1CIkNuI728t89UXYllwCiWytMvTSKdph45SvKRvQn4sFoQ2ajfWYfUpM%2F4maTU6QqDqMbT6rLQO23V%2BOZC0UaPZKIG1p0wTh%2FieWnW4ztbhbHH7wi1V01Ohdl82h7lY9%2B%2Fkc9Xua%2BC0o0mkHOKvjUgND57zuwHiAAAA/timespan/PT1H"
+              },
+              "nodes": [
+                {
+                  "name": "cmdemo3-tdd/ui",
+                  "role": "primary",
+                  "url": "https://cmdemo3-tdd.20-225-155-175.sslip.io",
+                  "links": {
+                    "portal": "https://portal.azure.com/#@40645332-2e20-4bca-882c-b2706f93ce44/resource/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo3-cluster/providers/Microsoft.ContainerService/managedClusters/aks-cmdemo3/workloads",
+                    "liveMetrics": "https://portal.azure.com/#@40645332-2e20-4bca-882c-b2706f93ce44/resource/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo3-cluster/providers/microsoft.insights/components/appi-cmdemo3-tdd/quickPulse",
+                    "performance": "https://portal.azure.com/#@40645332-2e20-4bca-882c-b2706f93ce44/resource/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo3-cluster/providers/microsoft.insights/components/appi-cmdemo3-tdd/performance",
+                    "failures": "https://portal.azure.com/#@40645332-2e20-4bca-882c-b2706f93ce44/resource/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo3-cluster/providers/microsoft.insights/components/appi-cmdemo3-tdd/failures",
+                    "dependencies": "https://portal.azure.com/#@40645332-2e20-4bca-882c-b2706f93ce44/blade/Microsoft_Azure_Monitoring_Logs/LogsBlade/resourceId/%2Fsubscriptions%2F4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69%2FresourceGroups%2Frg-cmdemo3-cluster%2Fproviders%2Fmicrosoft.insights%2Fcomponents%2Fappi-cmdemo3-tdd/source/LogsBlade.AnalyticsShareLinkToQuery/q/H4sIAAAAAAAAA02OS0rEUBRE51lF0aMEngORHvQgS9CBG2iu91big%2FcJ79PSksVLFMVp1TlFGTcmY1LPOuz4eGchNORu19cc%2BCKRmGecNBpjfnro%2FjTsqD1GKf6TUAmhYobmnto4OSziA%2B038ctYuyprPVYWCZWTg9zW50MquScb5baO1os0n9Pk8Dg5bJfzP2BjUabmA%2F84h8v5m8XbHe2%2B0aFJWdkckkQOO3IxlqP9eWis%2BgUAz8O57AAAAA%3D%3D/timespan/PT1H"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "uat",
+          "tier": "nonprod",
+          "versionsUrl": null,
+          "versionsHistoryUrl": null,
+          "links": {
+            "applicationInsights": "https://portal.azure.com/#@40645332-2e20-4bca-882c-b2706f93ce44/resource/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo3-cluster/providers/microsoft.insights/components/appi-cmdemo3-uat/overview",
+            "applicationMap": "https://portal.azure.com/#@40645332-2e20-4bca-882c-b2706f93ce44/resource/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo3-cluster/providers/microsoft.insights/components/appi-cmdemo3-uat/applicationMap",
+            "resourceGroup": "https://portal.azure.com/#@40645332-2e20-4bca-882c-b2706f93ce44/resource/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo3-cluster/overview"
+          },
+          "deployables": [
+            {
+              "name": "ui",
+              "projectUrl": "https://clearmeasure.octopus.app/app#/Spaces-357/projects/cmdemo3-ui",
+              "frontDoor": null,
+              "healthPath": "/_healthcheck",
+              "alivePath": "/alive",
+              "versionPath": "/_version",
+              "telemetryPath": "/_telemetry",
+              "trafficPaths": [
+                "/",
+                "/api/work-orders/status-counts"
+              ],
+              "buildPath": "/_build",
+              "pinUrl": "https://raw.githubusercontent.com/clearmeasure-aisf-sample-apps/cmdemo3-system/main/gitops/environments/uat/ui/kustomization.yaml",
+              "pinHistoryUrl": "https://github.com/clearmeasure-aisf-sample-apps/cmdemo3-system/commits/main/gitops/environments/uat/ui/kustomization.yaml",
+              "links": {
+                "logs": "https://portal.azure.com/#@40645332-2e20-4bca-882c-b2706f93ce44/blade/Microsoft_Azure_Monitoring_Logs/LogsBlade/resourceId/%2Fsubscriptions%2F4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69%2FresourceGroups%2Frg-cmdemo3-cluster%2Fproviders%2Fmicrosoft.insights%2Fcomponents%2Fappi-cmdemo3-uat/source/LogsBlade.AnalyticsShareLinkToQuery/q/H4sIAAAAAAAAA03OPWrEMBQE4N6nGLaSQCmWxcUWPkCKpMgFglYaE4F%2BnPcklgQffjEkIe0w3zDCz0HtOu24f1CIkNuI728t89UXYllwCiWytMvTSKdph45SvKRvQn4sFoQ2ajfWYfUpM%2F4maTU6QqDqMbT6rLQO23V%2BOZC0UaPZKIG1p0wTh%2FieWnW4ztbhbHH7wi1V01Ohdl82h7lY9%2B%2Fkc9Xua%2BC0o0mkHOKvjUgND57zuwHiAAAA/timespan/PT1H"
+              },
+              "nodes": [
+                {
+                  "name": "cmdemo3-uat/ui",
+                  "role": "primary",
+                  "url": "https://cmdemo3-uat.20-225-155-175.sslip.io",
+                  "links": {
+                    "portal": "https://portal.azure.com/#@40645332-2e20-4bca-882c-b2706f93ce44/resource/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo3-cluster/providers/Microsoft.ContainerService/managedClusters/aks-cmdemo3/workloads",
+                    "liveMetrics": "https://portal.azure.com/#@40645332-2e20-4bca-882c-b2706f93ce44/resource/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo3-cluster/providers/microsoft.insights/components/appi-cmdemo3-uat/quickPulse",
+                    "performance": "https://portal.azure.com/#@40645332-2e20-4bca-882c-b2706f93ce44/resource/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo3-cluster/providers/microsoft.insights/components/appi-cmdemo3-uat/performance",
+                    "failures": "https://portal.azure.com/#@40645332-2e20-4bca-882c-b2706f93ce44/resource/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo3-cluster/providers/microsoft.insights/components/appi-cmdemo3-uat/failures",
+                    "dependencies": "https://portal.azure.com/#@40645332-2e20-4bca-882c-b2706f93ce44/blade/Microsoft_Azure_Monitoring_Logs/LogsBlade/resourceId/%2Fsubscriptions%2F4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69%2FresourceGroups%2Frg-cmdemo3-cluster%2Fproviders%2Fmicrosoft.insights%2Fcomponents%2Fappi-cmdemo3-uat/source/LogsBlade.AnalyticsShareLinkToQuery/q/H4sIAAAAAAAAA02OS0rEUBRE51lF0aMEngORHvQgS9CBG2iu91big%2FcJ79PSksVLFMVp1TlFGTcmY1LPOuz4eGchNORu19cc%2BCKRmGecNBpjfnro%2FjTsqD1GKf6TUAmhYobmnto4OSziA%2B038ctYuyprPVYWCZWTg9zW50MquScb5baO1os0n9Pk8Dg5bJfzP2BjUabmA%2F84h8v5m8XbHe2%2B0aFJWdkckkQOO3IxlqP9eWis%2BgUAz8O57AAAAA%3D%3D/timespan/PT1H"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "prod",
+          "tier": "prod",
+          "versionsUrl": null,
+          "versionsHistoryUrl": null,
+          "links": {
+            "applicationInsights": "https://portal.azure.com/#@40645332-2e20-4bca-882c-b2706f93ce44/resource/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo3-cluster/providers/microsoft.insights/components/appi-cmdemo3-prod/overview",
+            "applicationMap": "https://portal.azure.com/#@40645332-2e20-4bca-882c-b2706f93ce44/resource/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo3-cluster/providers/microsoft.insights/components/appi-cmdemo3-prod/applicationMap",
+            "resourceGroup": "https://portal.azure.com/#@40645332-2e20-4bca-882c-b2706f93ce44/resource/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo3-cluster/overview"
+          },
+          "deployables": [
+            {
+              "name": "ui",
+              "projectUrl": "https://clearmeasure.octopus.app/app#/Spaces-357/projects/cmdemo3-ui",
+              "frontDoor": null,
+              "healthPath": "/_healthcheck",
+              "alivePath": "/alive",
+              "versionPath": "/_version",
+              "telemetryPath": "/_telemetry",
+              "trafficPaths": [
+                "/",
+                "/api/work-orders/status-counts"
+              ],
+              "buildPath": "/_build",
+              "pinUrl": "https://raw.githubusercontent.com/clearmeasure-aisf-sample-apps/cmdemo3-system/main/gitops/environments/prod/ui/kustomization.yaml",
+              "pinHistoryUrl": "https://github.com/clearmeasure-aisf-sample-apps/cmdemo3-system/commits/main/gitops/environments/prod/ui/kustomization.yaml",
+              "links": {
+                "logs": "https://portal.azure.com/#@40645332-2e20-4bca-882c-b2706f93ce44/blade/Microsoft_Azure_Monitoring_Logs/LogsBlade/resourceId/%2Fsubscriptions%2F4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69%2FresourceGroups%2Frg-cmdemo3-cluster%2Fproviders%2Fmicrosoft.insights%2Fcomponents%2Fappi-cmdemo3-prod/source/LogsBlade.AnalyticsShareLinkToQuery/q/H4sIAAAAAAAAA03OPWrEMBQE4N6nGLaSQCmWxcUWPkCKpMgFglYaE4F%2BnPcklgQffjEkIe0w3zDCz0HtOu24f1CIkNuI728t89UXYllwCiWytMvTSKdph45SvKRvQn4sFoQ2ajfWYfUpM%2F4maTU6QqDqMbT6rLQO23V%2BOZC0UaPZKIG1p0wTh%2FieWnW4ztbhbHH7wi1V01Ohdl82h7lY9%2B%2Fkc9Xua%2BC0o0mkHOKvjUgND57zuwHiAAAA/timespan/PT1H"
+              },
+              "nodes": [
+                {
+                  "name": "cmdemo3-prod/ui",
+                  "role": "primary",
+                  "url": "https://cmdemo3-prod.20-225-155-175.sslip.io",
+                  "links": {
+                    "portal": "https://portal.azure.com/#@40645332-2e20-4bca-882c-b2706f93ce44/resource/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo3-cluster/providers/Microsoft.ContainerService/managedClusters/aks-cmdemo3/workloads",
+                    "liveMetrics": "https://portal.azure.com/#@40645332-2e20-4bca-882c-b2706f93ce44/resource/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo3-cluster/providers/microsoft.insights/components/appi-cmdemo3-prod/quickPulse",
+                    "performance": "https://portal.azure.com/#@40645332-2e20-4bca-882c-b2706f93ce44/resource/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo3-cluster/providers/microsoft.insights/components/appi-cmdemo3-prod/performance",
+                    "failures": "https://portal.azure.com/#@40645332-2e20-4bca-882c-b2706f93ce44/resource/subscriptions/4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/resourceGroups/rg-cmdemo3-cluster/providers/microsoft.insights/components/appi-cmdemo3-prod/failures",
+                    "dependencies": "https://portal.azure.com/#@40645332-2e20-4bca-882c-b2706f93ce44/blade/Microsoft_Azure_Monitoring_Logs/LogsBlade/resourceId/%2Fsubscriptions%2F4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69%2FresourceGroups%2Frg-cmdemo3-cluster%2Fproviders%2Fmicrosoft.insights%2Fcomponents%2Fappi-cmdemo3-prod/source/LogsBlade.AnalyticsShareLinkToQuery/q/H4sIAAAAAAAAA02OS0rEUBRE51lF0aMEngORHvQgS9CBG2iu91big%2FcJ79PSksVLFMVp1TlFGTcmY1LPOuz4eGchNORu19cc%2BCKRmGecNBpjfnro%2FjTsqD1GKf6TUAmhYobmnto4OSziA%2B038ctYuyprPVYWCZWTg9zW50MquScb5baO1os0n9Pk8Dg5bJfzP2BjUabmA%2F84h8v5m8XbHe2%2B0aFJWdkckkQOO3IxlqP9eWis%2BgUAz8O57AAAAA%3D%3D/timespan/PT1H"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  runtime-index.json: |
+    {
+      "generated": "2026-10-06T19:02:50Z",
+      "plantuml": "1.2026.8",
+      "environments": [
+        {
+          "name": "tdd",
+          "manifest": "tdd.json",
+          "svg": "tdd.svg"
+        },
+        {
+          "name": "uat",
+          "manifest": "uat.json",
+          "svg": "uat.svg"
+        },
+        {
+          "name": "prod",
+          "manifest": "prod.json",
+          "svg": "prod.svg"
+        }
+      ]
+    }
+  runtime-prod.json: |
+    {
+      "environment": "prod",
+      "svg": "prod.svg",
+      "nodes": [
+        {
+          "alias": "browser",
+          "qualifiedName": "browser",
+          "kind": "person",
+          "name": "Browser"
+        },
+        {
+          "alias": "app_ui_primary",
+          "qualifiedName": "sub.rg_cluster.cluster.region_primary.app_ui_primary",
+          "kind": "webapp",
+          "deployable": "ui",
+          "name": "cmdemo3-prod/ui",
+          "role": "primary",
+          "region": "cmdemo3-prod",
+          "regionAlias": "region_primary",
+          "url": "https://cmdemo3-prod.20-225-155-175.sslip.io"
+        },
+        {
+          "alias": "sqldb",
+          "qualifiedName": "sub.rg_cluster.cluster.region_primary.sqldb",
+          "kind": "sql",
+          "name": "cmdemo3-prod/db",
+          "region": "cmdemo3-prod",
+          "regionAlias": "region_primary",
+          "url": null
+        },
+        {
+          "alias": "swa_dashboard",
+          "qualifiedName": "sub.rg_cluster.cluster.region_primary.swa_dashboard",
+          "kind": "staticsite",
+          "deployable": "dashboard",
+          "name": "cmdemo3-prod/dashboard",
+          "region": "cmdemo3-prod",
+          "regionAlias": "region_primary",
+          "url": "https://cmdemo3-uat-dashboard.20-225-155-175.sslip.io"
+        }
+      ],
+      "regions": [
+        {
+          "alias": "region_primary",
+          "qualifiedName": "sub.rg_cluster.cluster.region_primary",
+          "name": "cmdemo3-prod",
+          "roles": [
+            "primary"
+          ]
+        }
+      ],
+      "edges": [
+        {
+          "id": "browser-to-app_ui_primary",
+          "from": "browser",
+          "to": "app_ui_primary",
+          "kind": "public"
+        },
+        {
+          "id": "app_ui_primary-to-sqldb",
+          "from": "app_ui_primary",
+          "to": "sqldb",
+          "kind": "sql"
+        },
+        {
+          "id": "browser-to-swa_dashboard",
+          "from": "browser",
+          "to": "swa_dashboard",
+          "kind": "dashboard"
+        }
+      ],
+      "generated": "2026-10-06T19:02:50Z",
+      "plantuml": "1.2026.8"
+    }
+  runtime-prod.puml: |
+    @startuml
+    !pragma layout smetana
+    !include <C4/C4_Deployment>
+    LAYOUT_LEFT_RIGHT()
+    HIDE_STEREOTYPE()
+    SHOW_PERSON_OUTLINE()
+    skinparam wrapWidth 300
+    skinparam maxMessageSize 220
+    skinparam svgLinkTarget _blank
+    skinparam hyperlinkColor #1f5fae
+    skinparam hyperlinkUnderline true
+    skinparam nodesep 30
+    skinparam ranksep 40
+    UpdateElementStyle("container", $bgColor="#607d8b", $fontColor="#ffffff", $borderColor="#455a64")
+    UpdateElementStyle("person", $bgColor="#37474f", $fontColor="#ffffff", $borderColor="#263238")
+    AddBoundaryTag("scope", $bgColor="#ffffff", $fontColor="#263238", $borderColor="#78909c", $borderStyle=DottedLine())
+    AddNodeTag("region", $bgColor="#fafafa", $fontColor="#37474f", $borderColor="#90a4ae", $borderStyle=DashedLine())
+    AddNodeTag("plan", $bgColor="#ffffff", $fontColor="#37474f", $borderColor="#b0bec5")
+    UpdateRelStyle($textColor="#455a64", $lineColor="#78909c")
+
+    Person(browser, "Browser", "a user, or this dashboard")
+    Boundary(sub, "Azure subscription", $type="subscription", $tags="scope") {
+      Boundary(rg_cluster, "rg-cmdemo3-cluster", $type="resource group", $tags="scope") {
+        Deployment_Node(cluster, "aks-cmdemo3", "AKS cluster, southcentralus: 1 x Standard_D4as_v6", "one public address, 20.225.155.175 (Envoy Gateway), for every environment", $tags="plan") {
+          Deployment_Node(region_primary, "cmdemo3-prod", "namespace: environment prod", "<img:data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAL4AAAAWCAYAAAB+OyYeAAAAJklEQVR42u3BAQEAAACCIP+vbkhAAQAAAAAAAAAAAAAAAAAAADwYQWYAAUAsKwYAAAAASUVORK5CYII=>", $tags="region") {
+            Container(app_ui_primary, "ui", "Deployment: ui", "<img:data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPoAAACSCAYAAABsS9cKAAAApElEQVR42u3BMQEAAADCoPVPbQwfoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOBhOwAAARPT3VIAAAAASUVORK5CYII=>")
+            ContainerDb(sqldb, "db", "SQL Server 2022 Express, StatefulSet", "<img:data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPoAAAAuCAYAAAABQwQEAAAAQ0lEQVR42u3BMQEAAADCoPVPbQwfoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA4GWz3gABsYbbhAAAAABJRU5ErkJggg==>")
+            Container(swa_dashboard, "dashboard", "static site: dashboard", "<img:data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPoAAAAuCAYAAAABQwQEAAAAQ0lEQVR42u3BMQEAAADCoPVPbQwfoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA4GWz3gABsYbbhAAAAABJRU5ErkJggg==>")
+          }
+        }
+      }
+    }
+    Rel(browser, app_ui_primary, "cmdemo3-prod.20-225-155-1…sslip.io", "HTTPS", "<img:data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAKAAAAAiCAYAAADYt9L+AAAALElEQVR42u3BMQEAAADCoPVPbQwfoAAAAAAAAAAAAAAAAAAAAAAAAAAAAF4GVSIAAXQNQtEAAAAASUVORK5CYII=>\n<U+00A0>", $link="https://cmdemo3-prod.20-225-155-175.sslip.io")
+    Rel(app_ui_primary, sqldb, "reads and writes", "TCP 1433", "<img:data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAKAAAAAiCAYAAADYt9L+AAAALElEQVR42u3BMQEAAADCoPVPbQwfoAAAAAAAAAAAAAAAAAAAAAAAAAAAAF4GVSIAAXQNQtEAAAAASUVORK5CYII=>\n<U+00A0>")
+    Rel(browser, swa_dashboard, "loads the dashboard", "HTTPS", "")
+    @enduml
+  runtime-prod.svg: |
+    <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" data-diagram-type="DESCRIPTION" style="width:1372px;height:794px;background:#FFFFFF;" width="1372px" height="794px" viewBox="0 0 1372 794" zoomAndPan="magnify" preserveAspectRatio="none" contentStyleType="text/css"><?plantuml 1.2026.8?><defs/><g font-family="sans-serif" lengthAdjust="spacing"><!--cluster sub--><g class="cluster" data-qualified-name="sub" id="ent0002" data-source-line="1666"><rect x="488" y="4" width="868" height="766" fill="#FFF" style="stroke:#78909C;stroke-width:1;stroke-dasharray:1,1;" rx="2.5" ry="2.5"/><text x="837.441" y="20.852" fill="#263238" font-size="16" textLength="169.117" font-weight="700">Azure subscription</text><text x="874.621" y="35.764" fill="#263238" font-size="12" textLength="94.758" font-weight="700">[subscription]</text></g><!--cluster rg_cluster--><g class="cluster" data-qualified-name="sub.rg_cluster" id="ent0003" data-source-line="1666"><rect x="504" y="63" width="836" height="691" fill="#FFF" style="stroke:#78909C;stroke-width:1;stroke-dasharray:1,1;" rx="2.5" ry="2.5"/><text x="830.922" y="79.852" fill="#263238" font-size="16" textLength="182.156" font-weight="700">rg-cmdemo3-cluster</text><text x="864.906" y="94.764" fill="#263238" font-size="12" textLength="114.188" font-weight="700">[resource group]</text></g><!--cluster cluster--><g class="cluster" data-qualified-name="sub.rg_cluster.cluster" id="ent0004" data-source-line="115"><rect x="520" y="122" width="804" height="616" fill="#FFF" style="stroke:#B0BEC5;stroke-width:1;"/><text x="859.57" y="138.852" fill="#37474F" font-size="16" textLength="124.859" font-weight="700">aks-cmdemo3</text><text x="823.841" y="153.764" fill="#37474F" font-size="12" textLength="196.318">[AKS cluster, southcentralus: 1 x</text><text x="863.649" y="167.732" fill="#37474F" font-size="12" textLength="116.701">Standard_D4as_v6]</text><text x="919.775" y="183.558" fill="#37474F" font-size="14"> </text><text x="853.583" y="199.854" fill="#37474F" font-size="14" textLength="136.835">one public address,</text><text x="801.848" y="216.151" fill="#37474F" font-size="14" textLength="240.304">20.225.155.175 (Envoy Gateway),</text><text x="843.414" y="232.448" fill="#37474F" font-size="14" textLength="157.172">for every environment</text></g><!--cluster region_primary--><g class="cluster" data-qualified-name="sub.rg_cluster.cluster.region_primary" id="ent0005" data-source-line="115"><rect x="536" y="260" width="772" height="462" fill="#FAFAFA" style="stroke:#90A4AE;stroke-width:1;stroke-dasharray:7,7;"/><text x="854.156" y="276.852" fill="#37474F" font-size="16" textLength="135.688" font-weight="700">cmdemo3-prod</text><text x="824.767" y="291.764" fill="#37474F" font-size="12" textLength="194.467">[namespace: environment prod]</text><text x="919.775" y="307.589" fill="#37474F" font-size="14"> </text><image width="190" height="22" x="827" y="310.891" xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAL4AAAAWCAYAAAB+OyYeAAAAJklEQVR4Xu3BAQEAAACCIP+vbkhAAQAAAAAAAAAAAAAAAAAAADwYQWYAAYl/lNMAAAAASUVORK5CYII="/></g><!--entity browser--><g class="entity" data-qualified-name="browser" id="ent0001" data-source-line="176"><ellipse cx="103.77" cy="505.282" rx="24.782" ry="24.782" fill="#37474F" style="stroke:#263238;stroke-width:0.5;"/><rect x="6" y="530.064" width="195.54" height="71.219" fill="#37474F" style="stroke:#263238;stroke-width:0.5;" rx="24.782" ry="24.782"/><text x="66.708" y="554.915" fill="#FFF" font-size="16" textLength="74.125" font-weight="700">Browser</text><text x="101.545" y="571.684" fill="#FFF" font-size="14"> </text><text x="16" y="587.981" fill="#FFF" font-size="14">a</text><text x="24.579" y="587.981" fill="#FFF" font-size="14"> </text><text x="29.029" y="587.981" fill="#FFF" font-size="14" textLength="34.986">user,</text><text x="64.016" y="587.981" fill="#FFF" font-size="14"> </text><text x="68.466" y="587.981" fill="#FFF" font-size="14" textLength="14.321">or</text><text x="82.787" y="587.981" fill="#FFF" font-size="14"> </text><text x="87.237" y="587.981" fill="#FFF" font-size="14" textLength="25.546">this</text><text x="112.783" y="587.981" fill="#FFF" font-size="14"> </text><text x="117.233" y="587.981" fill="#FFF" font-size="14" textLength="74.307">dashboard</text></g><!--entity app_ui_primary--><g class="entity" data-qualified-name="sub.rg_cluster.cluster.region_primary.app_ui_primary" id="ent0006" data-source-line="71"><rect x="552" y="357.5" width="270" height="214.891" fill="#607D8B" style="stroke:#455A64;stroke-width:0.5;"/><text x="678.563" y="382.352" fill="#FFF" font-size="16" textLength="16.875" font-weight="700">ui</text><text x="636.22" y="397.264" fill="#FFF" font-size="12" textLength="82.125" font-style="italic">[Deployment:</text><text x="718.345" y="397.264" fill="#FFF" font-size="12" font-style="italic"> </text><text x="722.159" y="397.264" fill="#FFF" font-size="12" textLength="15.621" font-style="italic">ui]</text><text x="684.775" y="413.089" fill="#FFF" font-size="14"> </text><image width="250" height="146" x="562" y="416.391" xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPoAAACSCAYAAABsS9cKAAAApElEQVR4Xu3BMQEAAADCoPVPbQwfoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOBhOwAAATfRh0YAAAAASUVORK5CYII="/></g><!--entity sqldb--><g class="entity" data-qualified-name="sub.rg_cluster.cluster.region_primary.sqldb" id="ent0007" data-source-line="75"><path d="M1022,413 C1022,403 1157,403 1157,403 C1157,403 1292,403 1292,413 L1292,516.891 C1292,526.891 1157,526.891 1157,526.891 C1157,526.891 1022,526.891 1022,516.891 L1022,413" style="stroke:#455A64;stroke-width:0.5;" fill="#607D8B"/><path d="M1022,413 C1022,423 1157,423 1157,423 C1157,423 1292,423 1292,413" style="stroke:#455A64;stroke-width:0.5;" fill="none"/><text x="1145.547" y="441.852" fill="#FFF" font-size="16" textLength="22.906" font-weight="700">db</text><text x="1039.086" y="456.764" fill="#FFF" font-size="12" textLength="28.43" font-style="italic">[SQL</text><text x="1067.516" y="456.764" fill="#FFF" font-size="12" font-style="italic"> </text><text x="1071.33" y="456.764" fill="#FFF" font-size="12" textLength="39.352" font-style="italic">Server</text><text x="1110.682" y="456.764" fill="#FFF" font-size="12" font-style="italic"> </text><text x="1114.496" y="456.764" fill="#FFF" font-size="12" textLength="30.539" font-style="italic">2022</text><text x="1145.035" y="456.764" fill="#FFF" font-size="12" font-style="italic"> </text><text x="1148.85" y="456.764" fill="#FFF" font-size="12" textLength="50.936" font-style="italic">Express,</text><text x="1199.785" y="456.764" fill="#FFF" font-size="12" font-style="italic"> </text><text x="1203.6" y="456.764" fill="#FFF" font-size="12" textLength="71.314" font-style="italic">StatefulSet]</text><text x="1154.775" y="472.589" fill="#FFF" font-size="14"> </text><image width="250" height="46" x="1032" y="475.891" xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPoAAAAuCAYAAAABQwQEAAAAQ0lEQVR4Xu3BMQEAAADCoPVPbQwfoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA4GWz3gABDSRAygAAAABJRU5ErkJggg=="/></g><!--entity swa_dashboard--><g class="entity" data-qualified-name="sub.rg_cluster.cluster.region_primary.swa_dashboard" id="ent0008" data-source-line="71"><rect x="552" y="590.5" width="270" height="114.891" fill="#607D8B" style="stroke:#455A64;stroke-width:0.5;"/><text x="639.125" y="615.352" fill="#FFF" font-size="16" textLength="95.75" font-weight="700">dashboard</text><text x="617.326" y="630.264" fill="#FFF" font-size="12" textLength="37.629" font-style="italic">[static</text><text x="654.955" y="630.264" fill="#FFF" font-size="12" font-style="italic"> </text><text x="658.77" y="630.264" fill="#FFF" font-size="12" textLength="25.717" font-style="italic">site:</text><text x="684.486" y="630.264" fill="#FFF" font-size="12" font-style="italic"> </text><text x="688.301" y="630.264" fill="#FFF" font-size="12" textLength="68.373" font-style="italic">dashboard]</text><text x="684.775" y="646.089" fill="#FFF" font-size="14"> </text><image width="250" height="46" x="562" y="649.391" xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPoAAAAuCAYAAAABQwQEAAAAQ0lEQVR4Xu3BMQEAAADCoPVPbQwfoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA4GWz3gABDSRAygAAAABJRU5ErkJggg=="/></g><g class="link" data-entity-1="ent0001" data-entity-2="ent0006" id="lnk9" data-link-type="dependency"><polygon points="551.947,482.535,543.626,480.598,544.404,486.548,551.947,482.535" fill="#78909C" style="stroke:#78909C;stroke-width:1;stroke-linejoin:miter;stroke-miterlimit:10;"/><path d="M202.246,528.279 C298.028,515.75 437.173,497.549 544.015,483.573" style="stroke:#78909C;stroke-width:1;" fill="none"/><a target="_blank" href="https://cmdemo3-prod.20-225-155-175.sslip.io" xlink:href="https://cmdemo3-prod.20-225-155-175.sslip.io" xlink:type="simple" xlink:actuate="onRequest" xlink:show="new" title="https://cmdemo3-prod.20-225-155-175.sslip.io" xlink:title="https://cmdemo3-prod.20-225-155-175.sslip.io"><text x="222" y="414.139" fill="#1F5FAE" font-size="12" textLength="256.43" font-weight="700" text-decoration="underline">cmdemo3-prod.20-225-155-1…sslip.io</text></a><text x="326.265" y="428.107" fill="#455A64" font-size="12" textLength="47.9" font-style="italic">[HTTPS]</text><text x="348.308" y="442.076" fill="#455A64" font-size="12"> </text><image width="160" height="34" x="270.215" y="444.906" xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAKAAAAAiCAYAAADYt9L+AAAALElEQVR4Xu3BMQEAAADCoPVPbQwfoAAAAAAAAAAAAAAAAAAAAAAAAAAAAF4GVSIAAeOvXQsAAAAASUVORK5CYII="/><text x="348.308" y="490.045" fill="#455A64" font-size="12"> </text></g><g class="link" data-entity-1="ent0006" data-entity-2="ent0007" id="lnk10" data-link-type="dependency"><polygon points="1021.87,465,1013.87,462,1013.87,468,1021.87,465" fill="#78909C" style="stroke:#78909C;stroke-width:1;stroke-linejoin:miter;stroke-miterlimit:10;"/><path d="M822.11,465 C884.774,465 951.204,465 1013.87,465" style="stroke:#78909C;stroke-width:1;" fill="none"/><text x="865.196" y="385.139" fill="#455A64" font-size="12" textLength="37.887" font-weight="700">reads</text><text x="903.083" y="385.139" fill="#455A64" font-size="12" font-weight="700"> </text><text x="907.261" y="385.139" fill="#455A64" font-size="12" textLength="25.23" font-weight="700">and</text><text x="932.491" y="385.139" fill="#455A64" font-size="12" font-weight="700"> </text><text x="936.669" y="385.139" fill="#455A64" font-size="12" textLength="42.135" font-weight="700">writes</text><text x="888.669" y="399.107" fill="#455A64" font-size="12" textLength="27.627" font-style="italic">[TCP</text><text x="916.296" y="399.107" fill="#455A64" font-size="12" font-style="italic"> </text><text x="920.11" y="399.107" fill="#455A64" font-size="12" textLength="35.221" font-style="italic">1433]</text><text x="920.093" y="413.076" fill="#455A64" font-size="12"> </text><image width="160" height="34" x="842" y="415.906" xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAKAAAAAiCAYAAADYt9L+AAAALElEQVR4Xu3BMQEAAADCoPVPbQwfoAAAAAAAAAAAAAAAAAAAAAAAAAAAAF4GVSIAAeOvXQsAAAAASUVORK5CYII="/><text x="920.093" y="461.045" fill="#455A64" font-size="12"> </text></g><g class="link" data-entity-1="ent0001" data-entity-2="ent0008" id="lnk11" data-link-type="dependency"><polygon points="551.947,623.312,544.623,618.913,543.536,624.814,551.947,623.312" fill="#78909C" style="stroke:#78909C;stroke-width:1;stroke-linejoin:miter;stroke-miterlimit:10;"/><path d="M202.246,558.909 C298.028,576.549 437.238,602.187 544.08,621.863" style="stroke:#78909C;stroke-width:1;" fill="none"/><text x="281" y="547.139" fill="#455A64" font-size="12" textLength="36.188" font-weight="700">loads</text><text x="317.188" y="547.139" fill="#455A64" font-size="12" font-weight="700"> </text><text x="321.365" y="547.139" fill="#455A64" font-size="12" textLength="22.418" font-weight="700">the</text><text x="343.783" y="547.139" fill="#455A64" font-size="12" font-weight="700"> </text><text x="347.961" y="547.139" fill="#455A64" font-size="12" textLength="71.813" font-weight="700">dashboard</text><text x="326.437" y="561.107" fill="#455A64" font-size="12" textLength="47.9" font-style="italic">[HTTPS]</text></g></g></svg>
+  runtime-tdd.json: |
+    {
+      "environment": "tdd",
+      "svg": "tdd.svg",
+      "nodes": [
+        {
+          "alias": "browser",
+          "qualifiedName": "browser",
+          "kind": "person",
+          "name": "Browser"
+        },
+        {
+          "alias": "app_ui_primary",
+          "qualifiedName": "sub.rg_cluster.cluster.region_primary.app_ui_primary",
+          "kind": "webapp",
+          "deployable": "ui",
+          "name": "cmdemo3-tdd/ui",
+          "role": "primary",
+          "region": "cmdemo3-tdd",
+          "regionAlias": "region_primary",
+          "url": "https://cmdemo3-tdd.20-225-155-175.sslip.io"
+        },
+        {
+          "alias": "sqldb",
+          "qualifiedName": "sub.rg_cluster.cluster.region_primary.sqldb",
+          "kind": "sql",
+          "name": "cmdemo3-tdd/db",
+          "region": "cmdemo3-tdd",
+          "regionAlias": "region_primary",
+          "url": null
+        },
+        {
+          "alias": "swa_dashboard",
+          "qualifiedName": "sub.rg_cluster.cluster.region_primary.swa_dashboard",
+          "kind": "staticsite",
+          "deployable": "dashboard",
+          "name": "cmdemo3-tdd/dashboard",
+          "region": "cmdemo3-tdd",
+          "regionAlias": "region_primary",
+          "url": "https://cmdemo3-uat-dashboard.20-225-155-175.sslip.io"
+        }
+      ],
+      "regions": [
+        {
+          "alias": "region_primary",
+          "qualifiedName": "sub.rg_cluster.cluster.region_primary",
+          "name": "cmdemo3-tdd",
+          "roles": [
+            "primary"
+          ]
+        }
+      ],
+      "edges": [
+        {
+          "id": "browser-to-app_ui_primary",
+          "from": "browser",
+          "to": "app_ui_primary",
+          "kind": "public"
+        },
+        {
+          "id": "app_ui_primary-to-sqldb",
+          "from": "app_ui_primary",
+          "to": "sqldb",
+          "kind": "sql"
+        },
+        {
+          "id": "browser-to-swa_dashboard",
+          "from": "browser",
+          "to": "swa_dashboard",
+          "kind": "dashboard"
+        }
+      ],
+      "generated": "2026-10-06T19:02:50Z",
+      "plantuml": "1.2026.8"
+    }
+  runtime-tdd.puml: |
+    @startuml
+    !pragma layout smetana
+    !include <C4/C4_Deployment>
+    LAYOUT_LEFT_RIGHT()
+    HIDE_STEREOTYPE()
+    SHOW_PERSON_OUTLINE()
+    skinparam wrapWidth 300
+    skinparam maxMessageSize 220
+    skinparam svgLinkTarget _blank
+    skinparam hyperlinkColor #1f5fae
+    skinparam hyperlinkUnderline true
+    skinparam nodesep 30
+    skinparam ranksep 40
+    UpdateElementStyle("container", $bgColor="#607d8b", $fontColor="#ffffff", $borderColor="#455a64")
+    UpdateElementStyle("person", $bgColor="#37474f", $fontColor="#ffffff", $borderColor="#263238")
+    AddBoundaryTag("scope", $bgColor="#ffffff", $fontColor="#263238", $borderColor="#78909c", $borderStyle=DottedLine())
+    AddNodeTag("region", $bgColor="#fafafa", $fontColor="#37474f", $borderColor="#90a4ae", $borderStyle=DashedLine())
+    AddNodeTag("plan", $bgColor="#ffffff", $fontColor="#37474f", $borderColor="#b0bec5")
+    UpdateRelStyle($textColor="#455a64", $lineColor="#78909c")
+
+    Person(browser, "Browser", "a user, or this dashboard")
+    Boundary(sub, "Azure subscription", $type="subscription", $tags="scope") {
+      Boundary(rg_cluster, "rg-cmdemo3-cluster", $type="resource group", $tags="scope") {
+        Deployment_Node(cluster, "aks-cmdemo3", "AKS cluster, southcentralus: 1 x Standard_D4as_v6", "one public address, 20.225.155.175 (Envoy Gateway), for every environment", $tags="plan") {
+          Deployment_Node(region_primary, "cmdemo3-tdd", "namespace: environment tdd", "<img:data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAL4AAAAWCAYAAAB+OyYeAAAAJklEQVR42u3BAQEAAACCIP+vbkhAAQAAAAAAAAAAAAAAAAAAADwYQWYAAUAsKwYAAAAASUVORK5CYII=>", $tags="region") {
+            Container(app_ui_primary, "ui", "Deployment: ui", "<img:data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPoAAACSCAYAAABsS9cKAAAApElEQVR42u3BMQEAAADCoPVPbQwfoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOBhOwAAARPT3VIAAAAASUVORK5CYII=>")
+            ContainerDb(sqldb, "db", "SQL Server 2022 Express, StatefulSet", "<img:data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPoAAAAuCAYAAAABQwQEAAAAQ0lEQVR42u3BMQEAAADCoPVPbQwfoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA4GWz3gABsYbbhAAAAABJRU5ErkJggg==>")
+            Container(swa_dashboard, "dashboard", "static site: dashboard", "<img:data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPoAAAAuCAYAAAABQwQEAAAAQ0lEQVR42u3BMQEAAADCoPVPbQwfoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA4GWz3gABsYbbhAAAAABJRU5ErkJggg==>")
+          }
+        }
+      }
+    }
+    Rel(browser, app_ui_primary, "cmdemo3-tdd.20-225-155-17…sslip.io", "HTTPS", "<img:data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAKAAAAAiCAYAAADYt9L+AAAALElEQVR42u3BMQEAAADCoPVPbQwfoAAAAAAAAAAAAAAAAAAAAAAAAAAAAF4GVSIAAXQNQtEAAAAASUVORK5CYII=>\n<U+00A0>", $link="https://cmdemo3-tdd.20-225-155-175.sslip.io")
+    Rel(app_ui_primary, sqldb, "reads and writes", "TCP 1433", "<img:data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAKAAAAAiCAYAAADYt9L+AAAALElEQVR42u3BMQEAAADCoPVPbQwfoAAAAAAAAAAAAAAAAAAAAAAAAAAAAF4GVSIAAXQNQtEAAAAASUVORK5CYII=>\n<U+00A0>")
+    Rel(browser, swa_dashboard, "loads the dashboard", "HTTPS", "")
+    @enduml
+  runtime-tdd.svg: |
+    <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" data-diagram-type="DESCRIPTION" style="width:1372px;height:794px;background:#FFFFFF;" width="1372px" height="794px" viewBox="0 0 1372 794" zoomAndPan="magnify" preserveAspectRatio="none" contentStyleType="text/css"><?plantuml 1.2026.8?><defs/><g font-family="sans-serif" lengthAdjust="spacing"><!--cluster sub--><g class="cluster" data-qualified-name="sub" id="ent0002" data-source-line="1666"><rect x="488" y="4" width="868" height="766" fill="#FFF" style="stroke:#78909C;stroke-width:1;stroke-dasharray:1,1;" rx="2.5" ry="2.5"/><text x="837.441" y="20.852" fill="#263238" font-size="16" textLength="169.117" font-weight="700">Azure subscription</text><text x="874.621" y="35.764" fill="#263238" font-size="12" textLength="94.758" font-weight="700">[subscription]</text></g><!--cluster rg_cluster--><g class="cluster" data-qualified-name="sub.rg_cluster" id="ent0003" data-source-line="1666"><rect x="504" y="63" width="836" height="691" fill="#FFF" style="stroke:#78909C;stroke-width:1;stroke-dasharray:1,1;" rx="2.5" ry="2.5"/><text x="830.922" y="79.852" fill="#263238" font-size="16" textLength="182.156" font-weight="700">rg-cmdemo3-cluster</text><text x="864.906" y="94.764" fill="#263238" font-size="12" textLength="114.188" font-weight="700">[resource group]</text></g><!--cluster cluster--><g class="cluster" data-qualified-name="sub.rg_cluster.cluster" id="ent0004" data-source-line="115"><rect x="520" y="122" width="804" height="616" fill="#FFF" style="stroke:#B0BEC5;stroke-width:1;"/><text x="859.57" y="138.852" fill="#37474F" font-size="16" textLength="124.859" font-weight="700">aks-cmdemo3</text><text x="823.841" y="153.764" fill="#37474F" font-size="12" textLength="196.318">[AKS cluster, southcentralus: 1 x</text><text x="863.649" y="167.732" fill="#37474F" font-size="12" textLength="116.701">Standard_D4as_v6]</text><text x="919.775" y="183.558" fill="#37474F" font-size="14"> </text><text x="853.583" y="199.854" fill="#37474F" font-size="14" textLength="136.835">one public address,</text><text x="801.848" y="216.151" fill="#37474F" font-size="14" textLength="240.304">20.225.155.175 (Envoy Gateway),</text><text x="843.414" y="232.448" fill="#37474F" font-size="14" textLength="157.172">for every environment</text></g><!--cluster region_primary--><g class="cluster" data-qualified-name="sub.rg_cluster.cluster.region_primary" id="ent0005" data-source-line="115"><rect x="536" y="260" width="772" height="462" fill="#FAFAFA" style="stroke:#90A4AE;stroke-width:1;stroke-dasharray:7,7;"/><text x="859.773" y="276.852" fill="#37474F" font-size="16" textLength="124.453" font-weight="700">cmdemo3-tdd</text><text x="828.552" y="291.764" fill="#37474F" font-size="12" textLength="186.896">[namespace: environment tdd]</text><text x="919.775" y="307.589" fill="#37474F" font-size="14"> </text><image width="190" height="22" x="827" y="310.891" xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAL4AAAAWCAYAAAB+OyYeAAAAJklEQVR4Xu3BAQEAAACCIP+vbkhAAQAAAAAAAAAAAAAAAAAAADwYQWYAAYl/lNMAAAAASUVORK5CYII="/></g><!--entity browser--><g class="entity" data-qualified-name="browser" id="ent0001" data-source-line="176"><ellipse cx="103.77" cy="505.282" rx="24.782" ry="24.782" fill="#37474F" style="stroke:#263238;stroke-width:0.5;"/><rect x="6" y="530.064" width="195.54" height="71.219" fill="#37474F" style="stroke:#263238;stroke-width:0.5;" rx="24.782" ry="24.782"/><text x="66.708" y="554.915" fill="#FFF" font-size="16" textLength="74.125" font-weight="700">Browser</text><text x="101.545" y="571.684" fill="#FFF" font-size="14"> </text><text x="16" y="587.981" fill="#FFF" font-size="14">a</text><text x="24.579" y="587.981" fill="#FFF" font-size="14"> </text><text x="29.029" y="587.981" fill="#FFF" font-size="14" textLength="34.986">user,</text><text x="64.016" y="587.981" fill="#FFF" font-size="14"> </text><text x="68.466" y="587.981" fill="#FFF" font-size="14" textLength="14.321">or</text><text x="82.787" y="587.981" fill="#FFF" font-size="14"> </text><text x="87.237" y="587.981" fill="#FFF" font-size="14" textLength="25.546">this</text><text x="112.783" y="587.981" fill="#FFF" font-size="14"> </text><text x="117.233" y="587.981" fill="#FFF" font-size="14" textLength="74.307">dashboard</text></g><!--entity app_ui_primary--><g class="entity" data-qualified-name="sub.rg_cluster.cluster.region_primary.app_ui_primary" id="ent0006" data-source-line="71"><rect x="552" y="357.5" width="270" height="214.891" fill="#607D8B" style="stroke:#455A64;stroke-width:0.5;"/><text x="678.563" y="382.352" fill="#FFF" font-size="16" textLength="16.875" font-weight="700">ui</text><text x="636.22" y="397.264" fill="#FFF" font-size="12" textLength="82.125" font-style="italic">[Deployment:</text><text x="718.345" y="397.264" fill="#FFF" font-size="12" font-style="italic"> </text><text x="722.159" y="397.264" fill="#FFF" font-size="12" textLength="15.621" font-style="italic">ui]</text><text x="684.775" y="413.089" fill="#FFF" font-size="14"> </text><image width="250" height="146" x="562" y="416.391" xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPoAAACSCAYAAABsS9cKAAAApElEQVR4Xu3BMQEAAADCoPVPbQwfoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOBhOwAAATfRh0YAAAAASUVORK5CYII="/></g><!--entity sqldb--><g class="entity" data-qualified-name="sub.rg_cluster.cluster.region_primary.sqldb" id="ent0007" data-source-line="75"><path d="M1022,413 C1022,403 1157,403 1157,403 C1157,403 1292,403 1292,413 L1292,516.891 C1292,526.891 1157,526.891 1157,526.891 C1157,526.891 1022,526.891 1022,516.891 L1022,413" style="stroke:#455A64;stroke-width:0.5;" fill="#607D8B"/><path d="M1022,413 C1022,423 1157,423 1157,423 C1157,423 1292,423 1292,413" style="stroke:#455A64;stroke-width:0.5;" fill="none"/><text x="1145.547" y="441.852" fill="#FFF" font-size="16" textLength="22.906" font-weight="700">db</text><text x="1039.086" y="456.764" fill="#FFF" font-size="12" textLength="28.43" font-style="italic">[SQL</text><text x="1067.516" y="456.764" fill="#FFF" font-size="12" font-style="italic"> </text><text x="1071.33" y="456.764" fill="#FFF" font-size="12" textLength="39.352" font-style="italic">Server</text><text x="1110.682" y="456.764" fill="#FFF" font-size="12" font-style="italic"> </text><text x="1114.496" y="456.764" fill="#FFF" font-size="12" textLength="30.539" font-style="italic">2022</text><text x="1145.035" y="456.764" fill="#FFF" font-size="12" font-style="italic"> </text><text x="1148.85" y="456.764" fill="#FFF" font-size="12" textLength="50.936" font-style="italic">Express,</text><text x="1199.785" y="456.764" fill="#FFF" font-size="12" font-style="italic"> </text><text x="1203.6" y="456.764" fill="#FFF" font-size="12" textLength="71.314" font-style="italic">StatefulSet]</text><text x="1154.775" y="472.589" fill="#FFF" font-size="14"> </text><image width="250" height="46" x="1032" y="475.891" xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPoAAAAuCAYAAAABQwQEAAAAQ0lEQVR4Xu3BMQEAAADCoPVPbQwfoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA4GWz3gABDSRAygAAAABJRU5ErkJggg=="/></g><!--entity swa_dashboard--><g class="entity" data-qualified-name="sub.rg_cluster.cluster.region_primary.swa_dashboard" id="ent0008" data-source-line="71"><rect x="552" y="590.5" width="270" height="114.891" fill="#607D8B" style="stroke:#455A64;stroke-width:0.5;"/><text x="639.125" y="615.352" fill="#FFF" font-size="16" textLength="95.75" font-weight="700">dashboard</text><text x="617.326" y="630.264" fill="#FFF" font-size="12" textLength="37.629" font-style="italic">[static</text><text x="654.955" y="630.264" fill="#FFF" font-size="12" font-style="italic"> </text><text x="658.77" y="630.264" fill="#FFF" font-size="12" textLength="25.717" font-style="italic">site:</text><text x="684.486" y="630.264" fill="#FFF" font-size="12" font-style="italic"> </text><text x="688.301" y="630.264" fill="#FFF" font-size="12" textLength="68.373" font-style="italic">dashboard]</text><text x="684.775" y="646.089" fill="#FFF" font-size="14"> </text><image width="250" height="46" x="562" y="649.391" xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPoAAAAuCAYAAAABQwQEAAAAQ0lEQVR4Xu3BMQEAAADCoPVPbQwfoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA4GWz3gABDSRAygAAAABJRU5ErkJggg=="/></g><g class="link" data-entity-1="ent0001" data-entity-2="ent0006" id="lnk9" data-link-type="dependency"><polygon points="551.947,482.535,543.626,480.598,544.404,486.548,551.947,482.535" fill="#78909C" style="stroke:#78909C;stroke-width:1;stroke-linejoin:miter;stroke-miterlimit:10;"/><path d="M202.246,528.279 C298.028,515.75 437.173,497.549 544.015,483.573" style="stroke:#78909C;stroke-width:1;" fill="none"/><a target="_blank" href="https://cmdemo3-tdd.20-225-155-175.sslip.io" xlink:href="https://cmdemo3-tdd.20-225-155-175.sslip.io" xlink:type="simple" xlink:actuate="onRequest" xlink:show="new" title="https://cmdemo3-tdd.20-225-155-175.sslip.io" xlink:title="https://cmdemo3-tdd.20-225-155-175.sslip.io"><text x="222" y="414.139" fill="#1F5FAE" font-size="12" textLength="256.354" font-weight="700" text-decoration="underline">cmdemo3-tdd.20-225-155-17…sslip.io</text></a><text x="326.227" y="428.107" fill="#455A64" font-size="12" textLength="47.9" font-style="italic">[HTTPS]</text><text x="348.27" y="442.076" fill="#455A64" font-size="12"> </text><image width="160" height="34" x="270.177" y="444.906" xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAKAAAAAiCAYAAADYt9L+AAAALElEQVR4Xu3BMQEAAADCoPVPbQwfoAAAAAAAAAAAAAAAAAAAAAAAAAAAAF4GVSIAAeOvXQsAAAAASUVORK5CYII="/><text x="348.27" y="490.045" fill="#455A64" font-size="12"> </text></g><g class="link" data-entity-1="ent0006" data-entity-2="ent0007" id="lnk10" data-link-type="dependency"><polygon points="1021.87,465,1013.87,462,1013.87,468,1021.87,465" fill="#78909C" style="stroke:#78909C;stroke-width:1;stroke-linejoin:miter;stroke-miterlimit:10;"/><path d="M822.11,465 C884.774,465 951.204,465 1013.87,465" style="stroke:#78909C;stroke-width:1;" fill="none"/><text x="865.196" y="385.139" fill="#455A64" font-size="12" textLength="37.887" font-weight="700">reads</text><text x="903.083" y="385.139" fill="#455A64" font-size="12" font-weight="700"> </text><text x="907.261" y="385.139" fill="#455A64" font-size="12" textLength="25.23" font-weight="700">and</text><text x="932.491" y="385.139" fill="#455A64" font-size="12" font-weight="700"> </text><text x="936.669" y="385.139" fill="#455A64" font-size="12" textLength="42.135" font-weight="700">writes</text><text x="888.669" y="399.107" fill="#455A64" font-size="12" textLength="27.627" font-style="italic">[TCP</text><text x="916.296" y="399.107" fill="#455A64" font-size="12" font-style="italic"> </text><text x="920.11" y="399.107" fill="#455A64" font-size="12" textLength="35.221" font-style="italic">1433]</text><text x="920.093" y="413.076" fill="#455A64" font-size="12"> </text><image width="160" height="34" x="842" y="415.906" xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAKAAAAAiCAYAAADYt9L+AAAALElEQVR4Xu3BMQEAAADCoPVPbQwfoAAAAAAAAAAAAAAAAAAAAAAAAAAAAF4GVSIAAeOvXQsAAAAASUVORK5CYII="/><text x="920.093" y="461.045" fill="#455A64" font-size="12"> </text></g><g class="link" data-entity-1="ent0001" data-entity-2="ent0008" id="lnk11" data-link-type="dependency"><polygon points="551.947,623.312,544.623,618.913,543.536,624.814,551.947,623.312" fill="#78909C" style="stroke:#78909C;stroke-width:1;stroke-linejoin:miter;stroke-miterlimit:10;"/><path d="M202.246,558.909 C298.028,576.549 437.238,602.187 544.08,621.863" style="stroke:#78909C;stroke-width:1;" fill="none"/><text x="281" y="547.139" fill="#455A64" font-size="12" textLength="36.188" font-weight="700">loads</text><text x="317.188" y="547.139" fill="#455A64" font-size="12" font-weight="700"> </text><text x="321.365" y="547.139" fill="#455A64" font-size="12" textLength="22.418" font-weight="700">the</text><text x="343.783" y="547.139" fill="#455A64" font-size="12" font-weight="700"> </text><text x="347.961" y="547.139" fill="#455A64" font-size="12" textLength="71.813" font-weight="700">dashboard</text><text x="326.437" y="561.107" fill="#455A64" font-size="12" textLength="47.9" font-style="italic">[HTTPS]</text></g></g></svg>
+  runtime-uat.json: |
+    {
+      "environment": "uat",
+      "svg": "uat.svg",
+      "nodes": [
+        {
+          "alias": "browser",
+          "qualifiedName": "browser",
+          "kind": "person",
+          "name": "Browser"
+        },
+        {
+          "alias": "app_ui_primary",
+          "qualifiedName": "sub.rg_cluster.cluster.region_primary.app_ui_primary",
+          "kind": "webapp",
+          "deployable": "ui",
+          "name": "cmdemo3-uat/ui",
+          "role": "primary",
+          "region": "cmdemo3-uat",
+          "regionAlias": "region_primary",
+          "url": "https://cmdemo3-uat.20-225-155-175.sslip.io"
+        },
+        {
+          "alias": "sqldb",
+          "qualifiedName": "sub.rg_cluster.cluster.region_primary.sqldb",
+          "kind": "sql",
+          "name": "cmdemo3-uat/db",
+          "region": "cmdemo3-uat",
+          "regionAlias": "region_primary",
+          "url": null
+        },
+        {
+          "alias": "swa_dashboard",
+          "qualifiedName": "sub.rg_cluster.cluster.region_primary.swa_dashboard",
+          "kind": "staticsite",
+          "deployable": "dashboard",
+          "name": "cmdemo3-uat/dashboard",
+          "region": "cmdemo3-uat",
+          "regionAlias": "region_primary",
+          "url": "https://cmdemo3-uat-dashboard.20-225-155-175.sslip.io"
+        }
+      ],
+      "regions": [
+        {
+          "alias": "region_primary",
+          "qualifiedName": "sub.rg_cluster.cluster.region_primary",
+          "name": "cmdemo3-uat",
+          "roles": [
+            "primary"
+          ]
+        }
+      ],
+      "edges": [
+        {
+          "id": "browser-to-app_ui_primary",
+          "from": "browser",
+          "to": "app_ui_primary",
+          "kind": "public"
+        },
+        {
+          "id": "app_ui_primary-to-sqldb",
+          "from": "app_ui_primary",
+          "to": "sqldb",
+          "kind": "sql"
+        },
+        {
+          "id": "browser-to-swa_dashboard",
+          "from": "browser",
+          "to": "swa_dashboard",
+          "kind": "dashboard"
+        }
+      ],
+      "generated": "2026-10-06T19:02:50Z",
+      "plantuml": "1.2026.8"
+    }
+  runtime-uat.puml: |
+    @startuml
+    !pragma layout smetana
+    !include <C4/C4_Deployment>
+    LAYOUT_LEFT_RIGHT()
+    HIDE_STEREOTYPE()
+    SHOW_PERSON_OUTLINE()
+    skinparam wrapWidth 300
+    skinparam maxMessageSize 220
+    skinparam svgLinkTarget _blank
+    skinparam hyperlinkColor #1f5fae
+    skinparam hyperlinkUnderline true
+    skinparam nodesep 30
+    skinparam ranksep 40
+    UpdateElementStyle("container", $bgColor="#607d8b", $fontColor="#ffffff", $borderColor="#455a64")
+    UpdateElementStyle("person", $bgColor="#37474f", $fontColor="#ffffff", $borderColor="#263238")
+    AddBoundaryTag("scope", $bgColor="#ffffff", $fontColor="#263238", $borderColor="#78909c", $borderStyle=DottedLine())
+    AddNodeTag("region", $bgColor="#fafafa", $fontColor="#37474f", $borderColor="#90a4ae", $borderStyle=DashedLine())
+    AddNodeTag("plan", $bgColor="#ffffff", $fontColor="#37474f", $borderColor="#b0bec5")
+    UpdateRelStyle($textColor="#455a64", $lineColor="#78909c")
+
+    Person(browser, "Browser", "a user, or this dashboard")
+    Boundary(sub, "Azure subscription", $type="subscription", $tags="scope") {
+      Boundary(rg_cluster, "rg-cmdemo3-cluster", $type="resource group", $tags="scope") {
+        Deployment_Node(cluster, "aks-cmdemo3", "AKS cluster, southcentralus: 1 x Standard_D4as_v6", "one public address, 20.225.155.175 (Envoy Gateway), for every environment", $tags="plan") {
+          Deployment_Node(region_primary, "cmdemo3-uat", "namespace: environment uat", "<img:data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAL4AAAAWCAYAAAB+OyYeAAAAJklEQVR42u3BAQEAAACCIP+vbkhAAQAAAAAAAAAAAAAAAAAAADwYQWYAAUAsKwYAAAAASUVORK5CYII=>", $tags="region") {
+            Container(app_ui_primary, "ui", "Deployment: ui", "<img:data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPoAAACSCAYAAABsS9cKAAAApElEQVR42u3BMQEAAADCoPVPbQwfoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOBhOwAAARPT3VIAAAAASUVORK5CYII=>")
+            ContainerDb(sqldb, "db", "SQL Server 2022 Express, StatefulSet", "<img:data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPoAAAAuCAYAAAABQwQEAAAAQ0lEQVR42u3BMQEAAADCoPVPbQwfoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA4GWz3gABsYbbhAAAAABJRU5ErkJggg==>")
+            Container(swa_dashboard, "dashboard", "static site: dashboard", "<img:data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPoAAAAuCAYAAAABQwQEAAAAQ0lEQVR42u3BMQEAAADCoPVPbQwfoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA4GWz3gABsYbbhAAAAABJRU5ErkJggg==>")
+          }
+        }
+      }
+    }
+    Rel(browser, app_ui_primary, "cmdemo3-uat.20-225-155-17…sslip.io", "HTTPS", "<img:data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAKAAAAAiCAYAAADYt9L+AAAALElEQVR42u3BMQEAAADCoPVPbQwfoAAAAAAAAAAAAAAAAAAAAAAAAAAAAF4GVSIAAXQNQtEAAAAASUVORK5CYII=>\n<U+00A0>", $link="https://cmdemo3-uat.20-225-155-175.sslip.io")
+    Rel(app_ui_primary, sqldb, "reads and writes", "TCP 1433", "<img:data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAKAAAAAiCAYAAADYt9L+AAAALElEQVR42u3BMQEAAADCoPVPbQwfoAAAAAAAAAAAAAAAAAAAAAAAAAAAAF4GVSIAAXQNQtEAAAAASUVORK5CYII=>\n<U+00A0>")
+    Rel(browser, swa_dashboard, "loads the dashboard", "HTTPS", "")
+    @enduml
+  runtime-uat.svg: |
+    <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" data-diagram-type="DESCRIPTION" style="width:1371px;height:794px;background:#FFFFFF;" width="1371px" height="794px" viewBox="0 0 1371 794" zoomAndPan="magnify" preserveAspectRatio="none" contentStyleType="text/css"><?plantuml 1.2026.8?><defs/><g font-family="sans-serif" lengthAdjust="spacing"><!--cluster sub--><g class="cluster" data-qualified-name="sub" id="ent0002" data-source-line="1666"><rect x="487" y="4" width="868" height="766" fill="#FFF" style="stroke:#78909C;stroke-width:1;stroke-dasharray:1,1;" rx="2.5" ry="2.5"/><text x="836.441" y="20.852" fill="#263238" font-size="16" textLength="169.117" font-weight="700">Azure subscription</text><text x="873.621" y="35.764" fill="#263238" font-size="12" textLength="94.758" font-weight="700">[subscription]</text></g><!--cluster rg_cluster--><g class="cluster" data-qualified-name="sub.rg_cluster" id="ent0003" data-source-line="1666"><rect x="503" y="63" width="836" height="691" fill="#FFF" style="stroke:#78909C;stroke-width:1;stroke-dasharray:1,1;" rx="2.5" ry="2.5"/><text x="829.922" y="79.852" fill="#263238" font-size="16" textLength="182.156" font-weight="700">rg-cmdemo3-cluster</text><text x="863.906" y="94.764" fill="#263238" font-size="12" textLength="114.188" font-weight="700">[resource group]</text></g><!--cluster cluster--><g class="cluster" data-qualified-name="sub.rg_cluster.cluster" id="ent0004" data-source-line="115"><rect x="519" y="122" width="804" height="616" fill="#FFF" style="stroke:#B0BEC5;stroke-width:1;"/><text x="858.57" y="138.852" fill="#37474F" font-size="16" textLength="124.859" font-weight="700">aks-cmdemo3</text><text x="822.841" y="153.764" fill="#37474F" font-size="12" textLength="196.318">[AKS cluster, southcentralus: 1 x</text><text x="862.649" y="167.732" fill="#37474F" font-size="12" textLength="116.701">Standard_D4as_v6]</text><text x="918.775" y="183.558" fill="#37474F" font-size="14"> </text><text x="852.583" y="199.854" fill="#37474F" font-size="14" textLength="136.835">one public address,</text><text x="800.848" y="216.151" fill="#37474F" font-size="14" textLength="240.304">20.225.155.175 (Envoy Gateway),</text><text x="842.414" y="232.448" fill="#37474F" font-size="14" textLength="157.172">for every environment</text></g><!--cluster region_primary--><g class="cluster" data-qualified-name="sub.rg_cluster.cluster.region_primary" id="ent0005" data-source-line="115"><rect x="535" y="260" width="772" height="462" fill="#FAFAFA" style="stroke:#90A4AE;stroke-width:1;stroke-dasharray:7,7;"/><text x="859.133" y="276.852" fill="#37474F" font-size="16" textLength="123.734" font-weight="700">cmdemo3-uat</text><text x="827.689" y="291.764" fill="#37474F" font-size="12" textLength="186.621">[namespace: environment uat]</text><text x="918.775" y="307.589" fill="#37474F" font-size="14"> </text><image width="190" height="22" x="826" y="310.891" xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAL4AAAAWCAYAAAB+OyYeAAAAJklEQVR4Xu3BAQEAAACCIP+vbkhAAQAAAAAAAAAAAAAAAAAAADwYQWYAAYl/lNMAAAAASUVORK5CYII="/></g><!--entity browser--><g class="entity" data-qualified-name="browser" id="ent0001" data-source-line="176"><ellipse cx="103.77" cy="505.282" rx="24.782" ry="24.782" fill="#37474F" style="stroke:#263238;stroke-width:0.5;"/><rect x="6" y="530.064" width="195.54" height="71.219" fill="#37474F" style="stroke:#263238;stroke-width:0.5;" rx="24.782" ry="24.782"/><text x="66.708" y="554.915" fill="#FFF" font-size="16" textLength="74.125" font-weight="700">Browser</text><text x="101.545" y="571.684" fill="#FFF" font-size="14"> </text><text x="16" y="587.981" fill="#FFF" font-size="14">a</text><text x="24.579" y="587.981" fill="#FFF" font-size="14"> </text><text x="29.029" y="587.981" fill="#FFF" font-size="14" textLength="34.986">user,</text><text x="64.016" y="587.981" fill="#FFF" font-size="14"> </text><text x="68.466" y="587.981" fill="#FFF" font-size="14" textLength="14.321">or</text><text x="82.787" y="587.981" fill="#FFF" font-size="14"> </text><text x="87.237" y="587.981" fill="#FFF" font-size="14" textLength="25.546">this</text><text x="112.783" y="587.981" fill="#FFF" font-size="14"> </text><text x="117.233" y="587.981" fill="#FFF" font-size="14" textLength="74.307">dashboard</text></g><!--entity app_ui_primary--><g class="entity" data-qualified-name="sub.rg_cluster.cluster.region_primary.app_ui_primary" id="ent0006" data-source-line="71"><rect x="551" y="357.5" width="270" height="214.891" fill="#607D8B" style="stroke:#455A64;stroke-width:0.5;"/><text x="677.563" y="382.352" fill="#FFF" font-size="16" textLength="16.875" font-weight="700">ui</text><text x="635.22" y="397.264" fill="#FFF" font-size="12" textLength="82.125" font-style="italic">[Deployment:</text><text x="717.345" y="397.264" fill="#FFF" font-size="12" font-style="italic"> </text><text x="721.159" y="397.264" fill="#FFF" font-size="12" textLength="15.621" font-style="italic">ui]</text><text x="683.775" y="413.089" fill="#FFF" font-size="14"> </text><image width="250" height="146" x="561" y="416.391" xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPoAAACSCAYAAABsS9cKAAAApElEQVR4Xu3BMQEAAADCoPVPbQwfoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOBhOwAAATfRh0YAAAAASUVORK5CYII="/></g><!--entity sqldb--><g class="entity" data-qualified-name="sub.rg_cluster.cluster.region_primary.sqldb" id="ent0007" data-source-line="75"><path d="M1021,413 C1021,403 1156,403 1156,403 C1156,403 1291,403 1291,413 L1291,516.891 C1291,526.891 1156,526.891 1156,526.891 C1156,526.891 1021,526.891 1021,516.891 L1021,413" style="stroke:#455A64;stroke-width:0.5;" fill="#607D8B"/><path d="M1021,413 C1021,423 1156,423 1156,423 C1156,423 1291,423 1291,413" style="stroke:#455A64;stroke-width:0.5;" fill="none"/><text x="1144.547" y="441.852" fill="#FFF" font-size="16" textLength="22.906" font-weight="700">db</text><text x="1038.086" y="456.764" fill="#FFF" font-size="12" textLength="28.43" font-style="italic">[SQL</text><text x="1066.516" y="456.764" fill="#FFF" font-size="12" font-style="italic"> </text><text x="1070.33" y="456.764" fill="#FFF" font-size="12" textLength="39.352" font-style="italic">Server</text><text x="1109.682" y="456.764" fill="#FFF" font-size="12" font-style="italic"> </text><text x="1113.496" y="456.764" fill="#FFF" font-size="12" textLength="30.539" font-style="italic">2022</text><text x="1144.035" y="456.764" fill="#FFF" font-size="12" font-style="italic"> </text><text x="1147.85" y="456.764" fill="#FFF" font-size="12" textLength="50.936" font-style="italic">Express,</text><text x="1198.785" y="456.764" fill="#FFF" font-size="12" font-style="italic"> </text><text x="1202.6" y="456.764" fill="#FFF" font-size="12" textLength="71.314" font-style="italic">StatefulSet]</text><text x="1153.775" y="472.589" fill="#FFF" font-size="14"> </text><image width="250" height="46" x="1031" y="475.891" xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPoAAAAuCAYAAAABQwQEAAAAQ0lEQVR4Xu3BMQEAAADCoPVPbQwfoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA4GWz3gABDSRAygAAAABJRU5ErkJggg=="/></g><!--entity swa_dashboard--><g class="entity" data-qualified-name="sub.rg_cluster.cluster.region_primary.swa_dashboard" id="ent0008" data-source-line="71"><rect x="551" y="590.5" width="270" height="114.891" fill="#607D8B" style="stroke:#455A64;stroke-width:0.5;"/><text x="638.125" y="615.352" fill="#FFF" font-size="16" textLength="95.75" font-weight="700">dashboard</text><text x="616.326" y="630.264" fill="#FFF" font-size="12" textLength="37.629" font-style="italic">[static</text><text x="653.955" y="630.264" fill="#FFF" font-size="12" font-style="italic"> </text><text x="657.77" y="630.264" fill="#FFF" font-size="12" textLength="25.717" font-style="italic">site:</text><text x="683.486" y="630.264" fill="#FFF" font-size="12" font-style="italic"> </text><text x="687.301" y="630.264" fill="#FFF" font-size="12" textLength="68.373" font-style="italic">dashboard]</text><text x="683.775" y="646.089" fill="#FFF" font-size="14"> </text><image width="250" height="46" x="561" y="649.391" xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPoAAAAuCAYAAAABQwQEAAAAQ0lEQVR4Xu3BMQEAAADCoPVPbQwfoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA4GWz3gABDSRAygAAAABJRU5ErkJggg=="/></g><g class="link" data-entity-1="ent0001" data-entity-2="ent0006" id="lnk9" data-link-type="dependency"><polygon points="550.908,482.571,542.586,480.635,543.366,486.585,550.908,482.571" fill="#78909C" style="stroke:#78909C;stroke-width:1;stroke-linejoin:miter;stroke-miterlimit:10;"/><path d="M202.079,528.279 C297.615,515.761 436.341,497.583 542.976,483.61" style="stroke:#78909C;stroke-width:1;" fill="none"/><a target="_blank" href="https://cmdemo3-uat.20-225-155-175.sslip.io" xlink:href="https://cmdemo3-uat.20-225-155-175.sslip.io" xlink:type="simple" xlink:actuate="onRequest" xlink:show="new" title="https://cmdemo3-uat.20-225-155-175.sslip.io" xlink:title="https://cmdemo3-uat.20-225-155-175.sslip.io"><text x="222" y="414.139" fill="#1F5FAE" font-size="12" textLength="255.814" font-weight="700" text-decoration="underline">cmdemo3-uat.20-225-155-17…sslip.io</text></a><text x="325.957" y="428.107" fill="#455A64" font-size="12" textLength="47.9" font-style="italic">[HTTPS]</text><text x="348" y="442.076" fill="#455A64" font-size="12"> </text><image width="160" height="34" x="269.907" y="444.906" xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAKAAAAAiCAYAAADYt9L+AAAALElEQVR4Xu3BMQEAAADCoPVPbQwfoAAAAAAAAAAAAAAAAAAAAAAAAAAAAF4GVSIAAeOvXQsAAAAASUVORK5CYII="/><text x="348" y="490.045" fill="#455A64" font-size="12"> </text></g><g class="link" data-entity-1="ent0006" data-entity-2="ent0007" id="lnk10" data-link-type="dependency"><polygon points="1020.87,465,1012.87,462,1012.87,468,1020.87,465" fill="#78909C" style="stroke:#78909C;stroke-width:1;stroke-linejoin:miter;stroke-miterlimit:10;"/><path d="M821.11,465 C883.774,465 950.204,465 1012.87,465" style="stroke:#78909C;stroke-width:1;" fill="none"/><text x="864.196" y="385.139" fill="#455A64" font-size="12" textLength="37.887" font-weight="700">reads</text><text x="902.083" y="385.139" fill="#455A64" font-size="12" font-weight="700"> </text><text x="906.261" y="385.139" fill="#455A64" font-size="12" textLength="25.23" font-weight="700">and</text><text x="931.491" y="385.139" fill="#455A64" font-size="12" font-weight="700"> </text><text x="935.669" y="385.139" fill="#455A64" font-size="12" textLength="42.135" font-weight="700">writes</text><text x="887.669" y="399.107" fill="#455A64" font-size="12" textLength="27.627" font-style="italic">[TCP</text><text x="915.296" y="399.107" fill="#455A64" font-size="12" font-style="italic"> </text><text x="919.11" y="399.107" fill="#455A64" font-size="12" textLength="35.221" font-style="italic">1433]</text><text x="919.093" y="413.076" fill="#455A64" font-size="12"> </text><image width="160" height="34" x="841" y="415.906" xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAKAAAAAiCAYAAADYt9L+AAAALElEQVR4Xu3BMQEAAADCoPVPbQwfoAAAAAAAAAAAAAAAAAAAAAAAAAAAAF4GVSIAAeOvXQsAAAAASUVORK5CYII="/><text x="919.093" y="461.045" fill="#455A64" font-size="12"> </text></g><g class="link" data-entity-1="ent0001" data-entity-2="ent0008" id="lnk11" data-link-type="dependency"><polygon points="550.908,623.262,543.585,618.861,542.497,624.761,550.908,623.262" fill="#78909C" style="stroke:#78909C;stroke-width:1;stroke-linejoin:miter;stroke-miterlimit:10;"/><path d="M202.079,558.909 C297.615,576.534 436.406,602.139 543.041,621.811" style="stroke:#78909C;stroke-width:1;" fill="none"/><text x="280.5" y="547.139" fill="#455A64" font-size="12" textLength="36.188" font-weight="700">loads</text><text x="316.688" y="547.139" fill="#455A64" font-size="12" font-weight="700"> </text><text x="320.865" y="547.139" fill="#455A64" font-size="12" textLength="22.418" font-weight="700">the</text><text x="343.283" y="547.139" fill="#455A64" font-size="12" font-weight="700"> </text><text x="347.461" y="547.139" fill="#455A64" font-size="12" textLength="71.813" font-weight="700">dashboard</text><text x="325.937" y="561.107" fill="#455A64" font-size="12" textLength="47.9" font-style="italic">[HTTPS]</text></g></g></svg>
