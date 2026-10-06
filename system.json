@@ -139,12 +139,18 @@
     {
       "name": "uat",
       "tier": "nonprod",
-      "appCpu": "0.5"
+      "appCpu": "0.5",
+      "capabilities": [
+        "telemetry"
+      ]
     },
     {
       "name": "prod",
       "tier": "prod",
-      "appCpu": "0.5"
+      "appCpu": "0.5",
+      "capabilities": [
+        "telemetry"
+      ]
     }
   ],
   "cluster": {
