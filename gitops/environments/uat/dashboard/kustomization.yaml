@@ -9,4 +9,4 @@ resources:
   - content.yaml
 images:
   - name: acrcmdemo3q3zmsi.azurecr.io/cmdemo3/dashboard
-    newTag: 0.0.0-placeholder
+    newTag: "1.0.4"
