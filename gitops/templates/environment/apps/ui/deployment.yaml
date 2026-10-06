@@ -42,9 +42,21 @@ spec:
                 secretKeyRef:
                   name: db-credentials
                   key: app-connection-string
-            # No telemetry collector in the cluster: keep the app's exporter off.
+            # No OpenTelemetry collector in the cluster: the app's OTLP exporter stays off.
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: ""
+            # Telemetry goes to the environment's Application Insights under the app's own name, when the
+            # environment has capability "telemetry": the cluster job then keeps the connection string in Secret
+            # "telemetry" (it never reaches Git), and the variable names that Secret. Without the capability the
+            # variable names a Secret that does not exist, the app gets no connection string and exports nothing.
+            - name: OTEL_SERVICE_NAME
+              value: "cmdemo3-ui"
+            - name: APPLICATIONINSIGHTS_CONNECTION_STRING
+              valueFrom:
+                secretKeyRef:
+                  name: "#{Telemetry.Secret}"
+                  key: connection-string
+                  optional: true
           startupProbe:
             tcpSocket:
               port: http

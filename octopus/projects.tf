@@ -20,7 +20,7 @@ resource "octopusdeploy_project" "deployable" {
 
   name                              = "${local.slug}-${each.key}"
   slug                              = "${local.slug}-${each.key}"
-  description                       = "Deployable ${each.key} from ${local.system.system.githubOrg}/${each.value.repository}: migrate, write the image tag to Git, verify."
+  description                       = contains(keys(local.static_deployables), each.key) ? "Static site ${each.key} from ${local.system.system.githubOrg}/${each.value.repository}: write its content and the image tag to Git, verify." : "Deployable ${each.key} from ${local.system.system.githubOrg}/${each.value.repository}: migrate, write the image tag to Git, verify."
   project_group_id                  = octopusdeploy_project_group.system.id
   lifecycle_id                      = octopusdeploy_lifecycle.system.id
   tenanted_deployment_participation = "Untenanted"
@@ -276,6 +276,24 @@ resource "octopusdeploy_process_step" "update" {
   })
 }
 
+# A static site (the health dashboard) shows what its deployment wrote for the environment: topology.json and the
+# runtime diagrams, rendered from system.json on main and committed as ConfigMap <name>-content to
+# gitops/environments/<env>/<name>/content.yaml (scripts/write-dashboard-content.ps1). After "Update deployable": the
+# step waits until the site serves what it wrote, which the site's image must be running for.
+resource "octopusdeploy_process_step" "content" {
+  for_each = local.static_deployables
+
+  process_id     = octopusdeploy_process.deployable[each.key].id
+  name           = "Write dashboard content"
+  type           = "Octopus.Script"
+  worker_pool_id = local.cluster_worker_pool_id
+  container      = local.container
+
+  execution_properties = merge(local.script_properties, {
+    "Octopus.Action.Script.ScriptBody" = file("${path.module}/../scripts/write-dashboard-content.ps1")
+  })
+}
+
 # Runs only when an earlier step failed: names why the new version cannot start and commits the previous tag back
 # (scripts/revert-pin.ps1). It stands before the test steps, so failed acceptance tests fail the deployment, which
 # blocks its promotion, but leave the version that runs pinned.
@@ -400,6 +418,9 @@ resource "octopusdeploy_process_steps_order" "deployable" {
     [
       octopusdeploy_process_step.update[each.key].id,
       octopusdeploy_process_step.measure[each.key].id,
+    ],
+    contains(keys(local.static_deployables), each.key) ? [octopusdeploy_process_step.content[each.key].id] : [],
+    [
       octopusdeploy_process_step.verify[each.key].id,
       octopusdeploy_process_step.revert_pin[each.key].id,
     ],

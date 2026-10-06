@@ -21,6 +21,8 @@
          into the worker pool <slug>-cluster.
       5. Waits for the ingress platform Argo CD installs, and restarts cert-manager once when it started before the
          Gateway API definitions existed (it issues certificates for a Gateway only when they existed at its start).
+      6. Capability "telemetry": the connection string of each such environment's Application Insights, as Secret
+         "telemetry" of its namespace.
     No token is printed or passed as an argument: Helm reads them from standard input. Octopus holds no credential of
     the cluster; the gateway and the worker connect out to Octopus.
 
@@ -220,3 +222,34 @@ if (@($pods | Where-Object { [datetime] $_.status.startTime -lt [datetime] $defi
 }
 kubectl rollout status deployment --namespace cert-manager --selector 'app.kubernetes.io/component=controller' --timeout=300s | Out-Null
 Write-Host 'PASS Gateway API definitions and cert-manager'
+
+Write-Host '==> Telemetry'
+# Capability "telemetry" (system.json environments[].capabilities): infra/cluster.bicep gave the environment its own
+# Application Insights, and its app reads the connection string from Secret "telemetry" of its namespace (the
+# Deployment names that Secret once the environment's system release says so). The string carries the component's
+# instrumentation key and the repository is public, so it goes from Azure to the cluster here and never to Git; it
+# reaches kubectl on standard input, not as an argument. An environment without the capability has no such Secret.
+foreach ($entry in @($system.environments)) {
+    $name = [string] $entry.name
+    $namespace = "$slug-$name"
+    $exists = [bool] (kubectl get namespace $namespace --ignore-not-found --output name)
+    if (@($entry['capabilities']) -notcontains 'telemetry') {
+        if ($exists -and (kubectl get secret telemetry --namespace $namespace --ignore-not-found --output name)) {
+            kubectl delete secret telemetry --namespace $namespace | Out-Null
+            Write-Host "PASS ${name}: telemetry is off; Secret telemetry removed"
+        }
+        continue
+    }
+    $connection = "$(az resource show --resource-group $resourceGroup --name "appi-$slug-$name" --resource-type Microsoft.Insights/components --query properties.ConnectionString --output tsv)".Trim()
+    if (-not $connection) { throw "appi-$slug-$name in $resourceGroup has no connection string (infra/cluster.bicep creates it for an environment with capability telemetry)." }
+    # The environment's first system deployment creates its namespace; before that, this job does.
+    if (-not $exists) { kubectl create namespace $namespace --output name | Out-Null }
+    @{
+        apiVersion = 'v1'
+        kind       = 'Secret'
+        metadata   = @{ name = 'telemetry'; namespace = $namespace; labels = @{ system = $slug; environment = $name } }
+        type       = 'Opaque'
+        stringData = @{ 'connection-string' = $connection }
+    } | ConvertTo-Json -Depth 5 | kubectl apply --filename - --output name | Out-Null
+    Write-Host "PASS ${name}: Secret telemetry holds the connection string of appi-$slug-$name"
+}

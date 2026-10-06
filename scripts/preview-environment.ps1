@@ -83,6 +83,7 @@ function Get-TemplateValue {
         'Backup.Container'         = [string] $system.azure.backup.container
         'Backup.ClientId'          = [string] $system.azure.identities.backup.clientId
         'Environment.Tier'         = [string] $Entry.tier
+        'Telemetry.Secret'         = if (@($Entry['capabilities']) -contains 'telemetry') { 'telemetry' } else { 'telemetry-off' }
         # The nightly backups start ten minutes apart, in the order of the environments (sort_order starts at 1).
         'Backup.Minute'            = [string] ((($Position + 1) * 10) % 60)
         'App.CpuLimit'             = "$([Math]::Floor([double] $cpu * 1000))m"

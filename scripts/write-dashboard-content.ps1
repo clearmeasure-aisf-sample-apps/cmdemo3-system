@@ -1,0 +1,662 @@
+#!/usr/bin/env pwsh
+#Requires -Version 7.4
+
+<#
+.SYNOPSIS
+    Writes what the health dashboard shows in an environment (topology.json and the runtime diagrams) and commits it
+    to Git, where Argo CD picks it up (runtime aks-argocd).
+
+.DESCRIPTION
+    Step "Write dashboard content" of the Octopus project of a static site (<slug>-<name>, hosting "staticsite"), on
+    the Kubernetes worker in the cluster, after "Update deployable"; octopus/projects.tf inlines this file. The site's
+    image is the same in every environment; this step gives it the environment's content:
+      1. Reads system.json on main and builds the topology (the dashboard's README has the contract): every
+         environment, and in it every app with one node, the Deployment at its public address
+         https://<slug>-<env>.<cluster.domain>, and where its pin is (the newTag of
+         gitops/environments/<env>/<app>/kustomization.yaml). No Front Door, no standby: the runtime has neither.
+      2. Renders one C4 deployment diagram per environment with PlantUML (the pinned version, checked by its SHA-256,
+         its own layout engine): the subscription, the cluster's resource group, the cluster, the environment's
+         namespace with the app, SQL Server and this site, and the browser. Every drawn element the page updates is
+         checked in the SVG.
+      3. Commits all of it as one ConfigMap, <name>-content, to gitops/environments/<env>/<name>/content.yaml through
+         the GitHub API (GitHub.Token, never printed or passed as an argument). Argo CD applies the commit and the
+         kubelet refreshes the files the site's web server reads; nothing restarts.
+      4. Waits until the site serves the topology it wrote.
+    The links into the Azure portal are conventions over system.json (the cluster, and with capability "telemetry" the
+    environment's Application Insights); the portal asks the viewer to sign in.
+#>
+[CmdletBinding()]
+param()
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+$PSNativeCommandArgumentPassing = 'Standard'
+$PSNativeCommandUseErrorActionPreference = $true
+$ProgressPreference = 'SilentlyContinue'
+
+# PlantUML, at a fixed version, for the runtime diagrams: the release jar of github.com/plantuml/plantuml, checked
+# against this SHA-256 before it runs. The dashboard finds the drawn elements by attributes of PlantUML's SVG that are
+# not a documented contract (they changed in 1.2026.3 and 1.2026.4), so a new version is a change of this script,
+# checked by rendering (Write-RuntimeDiagram fails the step when a handle is missing).
+$plantUmlVersion = '1.2026.8'
+$plantUmlSha256 = '5E1ECFA8ECD32C90B03BBF3B1EB6F020943F98AB0FCF4032BE31A0002EE2C462'
+
+function Get-PortalAddress {
+    # The address of a resource's page (a "blade" of its menu, such as overview or performance) in the Azure portal.
+    # With the tenant the portal opens the right directory for a viewer who has several.
+    param(
+        [Parameter(Mandatory)] [string] $ResourceId,
+        [string] $Blade = 'overview',
+        [string] $TenantId = ''
+    )
+    $directory = if ($TenantId) { "@$TenantId/" } else { '' }
+    return "https://portal.azure.com/#${directory}resource$ResourceId/$Blade"
+}
+
+function Get-LogsAddress {
+    # The address of the Logs blade of a resource (an Application Insights component) with a query filled in: the
+    # portal's own "share a link to the query" form, the query gzipped, base64-encoded and URL-encoded.
+    param(
+        [Parameter(Mandatory)] [string] $ResourceId,
+        [Parameter(Mandatory)] [string] $Query,
+        [string] $Timespan = 'PT1H',
+        [string] $TenantId = ''
+    )
+    $buffer = [IO.MemoryStream]::new()
+    $gzip = [IO.Compression.GZipStream]::new($buffer, [IO.Compression.CompressionLevel]::Optimal, $true)
+    $bytes = [Text.Encoding]::UTF8.GetBytes($Query)
+    $gzip.Write($bytes, 0, $bytes.Length)
+    $gzip.Dispose()
+    $packed = [Uri]::EscapeDataString([Convert]::ToBase64String($buffer.ToArray()))
+    $directory = if ($TenantId) { "@$TenantId/" } else { '' }
+    return "https://portal.azure.com/#${directory}blade/Microsoft_Azure_Monitoring_Logs/LogsBlade/resourceId/$([Uri]::EscapeDataString($ResourceId))/source/LogsBlade.AnalyticsShareLinkToQuery/q/$packed/timespan/$Timespan"
+}
+
+function ConvertTo-ClusterTopology {
+    # The dashboard's topology from system.json (parsed, as a hashtable). It asks nothing: the same input gives the
+    # same topology. Every app (a deployable that is no static site) has one node per environment: its Deployment, at
+    # the public address the Gateway gives it. The pin of an app is the newTag of its kustomization on main (pinUrl).
+    param(
+        [Parameter(Mandatory)] [hashtable] $System,
+        [datetime] $Generated = [datetime]::UtcNow
+    )
+    $slug = [string] $System.system.slug
+    $domain = [string] $System.cluster.domain
+    $apps = @($System.deployables | Where-Object { [string] $_['hosting'] -ne 'staticsite' })
+    $first = [string] @($System.deployables)[0].name
+    $githubOrg = [string] $System.system['githubOrg']
+    $repositoryName = [string] $System.system['repository']
+    $repository = if ($githubOrg -and $repositoryName) { "$githubOrg/$repositoryName" } else { '' }
+    $octopus = if ($System['octopus']) { $System.octopus } else { @{} }
+    $octopusUrl = ([string] $octopus['url']).TrimEnd('/')
+    $spaceId = [string] $octopus['spaceId']
+    $projects = if ($octopusUrl -and $spaceId) { "$octopusUrl/app#/$spaceId/projects" } else { '' }
+    $azure = if ($System['azure']) { $System.azure } else { @{} }
+    $tenantId = [string] $azure['tenantId']
+    $subscription = if ($azure['subscriptionId']) { "/subscriptions/$([string] $azure.subscriptionId)" } else { '' }
+    $groupName = if ($azure['resourceGroups']) { [string] $azure.resourceGroups['cluster'] } else { '' }
+    $group = if ($subscription -and $groupName) { "$subscription/resourceGroups/$groupName" } else { '' }
+    $cluster = if ($group -and $System.cluster['name']) { "$group/providers/Microsoft.ContainerService/managedClusters/$([string] $System.cluster.name)" } else { '' }
+    $environments = @(foreach ($environment in @($System.environments)) {
+            $environmentName = [string] $environment.name
+            $namespace = "$slug-$environmentName"
+            $insights = if ($group -and @($environment['capabilities']) -contains 'telemetry') { "$group/providers/microsoft.insights/components/appi-$slug-$environmentName" } else { '' }
+            $environmentLinks = [ordered] @{}
+            if ($insights) {
+                $environmentLinks.applicationInsights = Get-PortalAddress -ResourceId $insights -TenantId $tenantId
+                $environmentLinks.applicationMap = Get-PortalAddress -ResourceId $insights -Blade 'applicationMap' -TenantId $tenantId
+            }
+            if ($group) { $environmentLinks.resourceGroup = Get-PortalAddress -ResourceId $group -TenantId $tenantId }
+            $deployables = @(foreach ($app in $apps) {
+                    $appName = [string] $app.name
+                    $suffix = if ($appName -eq $first) { '' } else { "-$appName" }
+                    $pinPath = "main/gitops/environments/$environmentName/$appName/kustomization.yaml"
+                    # Where the node's numbers lead: the cluster's workloads, and with telemetry the environment's
+                    # Application Insights, whose Logs queries are filtered to the app's role (OTEL_SERVICE_NAME).
+                    $role = "$slug-$appName"
+                    $node = [ordered] @{ name = "$namespace/$appName"; role = 'primary'; url = "https://$slug-$environmentName$suffix.$domain" }
+                    $nodeLinks = [ordered] @{}
+                    if ($cluster) { $nodeLinks.portal = Get-PortalAddress -ResourceId $cluster -Blade 'workloads' -TenantId $tenantId }
+                    if ($insights) {
+                        $nodeLinks.liveMetrics = Get-PortalAddress -ResourceId $insights -Blade 'quickPulse' -TenantId $tenantId
+                        $nodeLinks.performance = Get-PortalAddress -ResourceId $insights -Blade 'performance' -TenantId $tenantId
+                        $nodeLinks.failures = Get-PortalAddress -ResourceId $insights -Blade 'failures' -TenantId $tenantId
+                        $nodeLinks.dependencies = Get-LogsAddress -ResourceId $insights -TenantId $tenantId -Query (@(
+                                'dependencies'
+                                "| where cloud_RoleName == `"$role`""
+                                '| summarize calls = count(), failed = countif(success == false), avgMs = round(avg(duration), 1), p95Ms = round(percentile(duration, 95), 1) by type, target, name'
+                                '| order by calls desc'
+                            ) -join "`n")
+                    }
+                    if ($nodeLinks.Count -gt 0) { $node.links = $nodeLinks }
+                    $deployableLinks = [ordered] @{}
+                    if ($insights) {
+                        $deployableLinks.logs = Get-LogsAddress -ResourceId $insights -TenantId $tenantId -Query (@(
+                                'requests'
+                                "| where cloud_RoleName == `"$role`""
+                                '| summarize requests = count(), failed = countif(success == false), p95Ms = round(percentile(duration, 95), 1) by bin(timestamp, 5m), cloud_RoleInstance'
+                                '| order by timestamp desc'
+                            ) -join "`n")
+                    }
+                    [ordered] @{
+                        name          = $appName
+                        projectUrl    = if ($projects) { "$projects/$slug-$appName" } else { $null }
+                        frontDoor     = $null
+                        healthPath    = if ($app['healthPath']) { [string] $app.healthPath } else { '/_healthcheck' }
+                        alivePath     = '/alive'
+                        versionPath   = '/_version'
+                        # The app's own count of its calls, what the traffic button calls and where it describes its
+                        # build (deployables[].telemetryPath, trafficPaths, buildPath): null without them.
+                        telemetryPath = if ($app['telemetryPath']) { [string] $app.telemetryPath } else { $null }
+                        trafficPaths  = if ($app['trafficPaths']) { , @($app.trafficPaths | ForEach-Object { [string] $_ }) } else { $null }
+                        buildPath     = if ($app['buildPath']) { [string] $app.buildPath } else { $null }
+                        # The pin: the image tag step "Update deployable" commits (the dashboard reads its newTag).
+                        pinUrl        = if ($repository) { "https://raw.githubusercontent.com/$repository/$pinPath" } else { $null }
+                        pinHistoryUrl = if ($repository) { "https://github.com/$repository/commits/$pinPath" } else { $null }
+                        links         = $deployableLinks
+                        nodes         = @($node)
+                    }
+                })
+            [ordered] @{
+                name               = $environmentName
+                tier               = [string] $environment['tier']
+                versionsUrl        = $null
+                versionsHistoryUrl = $null
+                links              = $environmentLinks
+                deployables        = $deployables
+            }
+        })
+    return [ordered] @{
+        system       = [ordered] @{
+            slug        = $slug
+            name        = [string] $System.system['name']
+            repository  = if ($repository) { "https://github.com/$repository" } else { $null }
+            # The delivery facts: workflow delivery of the system repository publishes them to its branch "status".
+            deliveryUrl = if ($repository) { "https://raw.githubusercontent.com/$repository/status/delivery.json" } else { $null }
+        }
+        generated    = $Generated.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ', [Globalization.CultureInfo]::InvariantCulture)
+        environments = $environments
+    }
+}
+
+function New-TransparentPng {
+    # A fully transparent PNG of the given size, as a data: URI. The runtime diagrams reserve the room the browser draws
+    # into with such an image (a "slot"): PlantUML lays it out like any image, and its size never depends on text.
+    param(
+        [Parameter(Mandatory)] [int] $Width,
+        [Parameter(Mandatory)] [int] $Height
+    )
+    function ConvertTo-BigEndian { param([uint32] $Value) [byte[]] @((($Value -shr 24) -band 255), (($Value -shr 16) -band 255), (($Value -shr 8) -band 255), ($Value -band 255)) }
+    function Get-Crc32 {
+        param([byte[]] $Bytes)
+        [uint32] $crc = [uint32]::MaxValue
+        foreach ($byte in $Bytes) {
+            $crc = [uint32] ($crc -bxor $byte)
+            for ($bit = 0; $bit -lt 8; $bit++) {
+                $crc = if ($crc -band 1) { [uint32] (($crc -shr 1) -bxor 0xEDB88320u) } else { [uint32] ($crc -shr 1) }
+            }
+        }
+        [uint32] ($crc -bxor [uint32]::MaxValue)
+    }
+    function New-Chunk {
+        param([string] $Type, [byte[]] $Data)
+        $typed = [byte[]] ([Text.Encoding]::ASCII.GetBytes($Type) + $Data)
+        [byte[]] ((ConvertTo-BigEndian ([uint32] $Data.Length)) + $typed + (ConvertTo-BigEndian (Get-Crc32 $typed)))
+    }
+    # Every row: filter byte 0, then width RGBA pixels of 0 (transparent black).
+    $raw = [byte[]]::new(($Width * 4 + 1) * $Height)
+    $buffer = [IO.MemoryStream]::new()
+    $zlib = [IO.Compression.ZLibStream]::new($buffer, [IO.Compression.CompressionLevel]::SmallestSize, $true)
+    $zlib.Write($raw, 0, $raw.Length)
+    $zlib.Dispose()
+    $header = [byte[]] ((ConvertTo-BigEndian ([uint32] $Width)) + (ConvertTo-BigEndian ([uint32] $Height)) + [byte[]] @(8, 6, 0, 0, 0))
+    $png = [byte[]] @(137, 80, 78, 71, 13, 10, 26, 10) + (New-Chunk 'IHDR' $header) + (New-Chunk 'IDAT' $buffer.ToArray()) + (New-Chunk 'IEND' ([byte[]] @()))
+    return "data:image/png;base64,$([Convert]::ToBase64String([byte[]] $png))"
+}
+
+function ConvertTo-ClusterDiagram {
+    # The runtime diagram of one environment: PlantUML source (C4 deployment view) and the manifest that tells the
+    # dashboard which drawn element is which. It asks nothing: the same input gives the same diagram.
+    #
+    # Aliases (the dashboard finds the drawn elements by them). <d> is a deployable's name with every character but a
+    # letter or a digit as "_":
+    #   browser            the person: a browser on the internet
+    #   sub, rg_cluster    boundaries: the Azure subscription, the cluster's resource group
+    #   cluster            the AKS cluster (its region, its nodes, its one public address)
+    #   region_primary     the environment's namespace: the frame that says whether the environment serves
+    #   app_<d>_primary    an app's Deployment          sqldb    SQL Server's StatefulSet
+    #   swa_<d>            a static site's Deployment (the dashboard)
+    # Relationships, id "<from>-to-<to>": browser-to-app_<d>_primary (the public address), app_<d>_primary-to-sqldb,
+    # browser-to-swa_<d>.
+    #
+    # Slots: every node's description is a transparent image of a fixed size, and so is the description of the
+    # namespace and of every relationship that carries a number: the dashboard draws the live values into them.
+    param(
+        [Parameter(Mandatory)] [hashtable] $System,
+        [Parameter(Mandatory)] [System.Collections.IDictionary] $Topology,
+        [Parameter(Mandatory)] [string] $Environment,
+        [hashtable] $DashboardUrl = @{}
+    )
+    $slug = [string] $System.system.slug
+    $entry = @($System.environments | Where-Object { [string] $_.name -eq $Environment }) | Select-Object -First 1
+    if (-not $entry) { throw "system.json has no environment $Environment." }
+    $namespace = "$slug-$Environment"
+    $statics = @($System.deployables | Where-Object { [string] $_['hosting'] -eq 'staticsite' })
+    $topologyEnvironment = @($Topology.environments | Where-Object { $_.name -eq $Environment }) | Select-Object -First 1
+    $apps = if ($topologyEnvironment) { @($topologyEnvironment.deployables) } else { @() }
+    $clusterName = [string] $System.cluster.name
+    $nodeText = "$([string] $System.cluster['nodeCount']) x $([string] $System.cluster['nodeSize'])"
+    $edition = if ($System['sql'] -and $System.sql['edition']) { [string] $System.sql.edition } else { '' }
+
+    $aliasOf = @{}
+    function Get-DeployableAlias {
+        param([string] $Name)
+        $alias = $Name -replace '[^A-Za-z0-9]', '_'
+        if ($aliasOf.ContainsKey($alias) -and $aliasOf[$alias] -ne $Name) {
+            throw "Deployables $($aliasOf[$alias]) and $Name have the same alias $alias in the runtime diagram: rename one."
+        }
+        $aliasOf[$alias] = $Name
+        $alias
+    }
+    function Get-Quoted { param([string] $Text) '"' + ($Text -replace '"', "'") + '"' }
+
+    # Slots (pixels): an app's tile holds the badge, seven lines 15 px apart and the history strip; the database's and
+    # the site's a badge and a line; the namespace's one line; a relationship's the number in its frame.
+    $tileSlot = "<img:$(New-TransparentPng -Width 250 -Height 146)>"
+    $smallTileSlot = "<img:$(New-TransparentPng -Width 250 -Height 46)>"
+    $regionSlot = "<img:$(New-TransparentPng -Width 190 -Height 22)>"
+    $edgeSlot = "<img:$(New-TransparentPng -Width 160 -Height 34)>"
+
+    $nodes = [Collections.Generic.List[object]]::new()
+    $edges = [Collections.Generic.List[object]]::new()
+    $edgeLines = [Collections.Generic.List[string]]::new()
+    function Add-Edge {
+        param([string] $From, [string] $To, [string] $Kind, [string] $Label, [string] $Technology, [bool] $Slot, [string] $Link = '')
+        $edges.Add([ordered] @{ id = "$From-to-$To"; from = $From; to = $To; kind = $Kind })
+        $description = if ($Slot) { $edgeSlot + '\n<U+00A0>' } else { '' }
+        $address = if ($Link) { ", `$link=$(Get-Quoted $Link)" } else { '' }
+        $edgeLines.Add("Rel($From, $To, $(Get-Quoted $Label), $(Get-Quoted $Technology), $(Get-Quoted $description)$address)")
+    }
+    function Get-ShortHost {
+        # A public address as the arrow's label: the host name, and when that is long its start, an ellipsis and its end.
+        param([string] $Url, [int] $Length = 34)
+        $name = ([uri] $Url).Host
+        if ($name.Length -le $Length) { return $name }
+        $end = ($name -split '\.' | Select-Object -Last 2) -join '.'
+        $start = [Math]::Max(4, $Length - $end.Length - 1)
+        return $name.Substring(0, $start) + [char] 0x2026 + $end
+    }
+
+    $lines = [Collections.Generic.List[string]]::new()
+    $lines.Add('@startuml')
+    $lines.Add('!pragma layout smetana')
+    $lines.Add('!include <C4/C4_Deployment>')
+    $lines.Add('LAYOUT_LEFT_RIGHT()')
+    $lines.Add('HIDE_STEREOTYPE()')
+    $lines.Add('SHOW_PERSON_OUTLINE()')
+    $lines.Add('skinparam wrapWidth 300')
+    $lines.Add('skinparam maxMessageSize 220')
+    # A public address on an arrow is a link, in the page's link colour, that opens in a new tab.
+    $lines.Add('skinparam svgLinkTarget _blank')
+    $lines.Add('skinparam hyperlinkColor #1f5fae')
+    $lines.Add('skinparam hyperlinkUnderline true')
+    $lines.Add('skinparam nodesep 30')
+    $lines.Add('skinparam ranksep 40')
+    # The look before the dashboard updates it (and of a diagram opened on its own): neutral, nothing claims a state.
+    $lines.Add('UpdateElementStyle("container", $bgColor="#607d8b", $fontColor="#ffffff", $borderColor="#455a64")')
+    $lines.Add('UpdateElementStyle("person", $bgColor="#37474f", $fontColor="#ffffff", $borderColor="#263238")')
+    $lines.Add('AddBoundaryTag("scope", $bgColor="#ffffff", $fontColor="#263238", $borderColor="#78909c", $borderStyle=DottedLine())')
+    $lines.Add('AddNodeTag("region", $bgColor="#fafafa", $fontColor="#37474f", $borderColor="#90a4ae", $borderStyle=DashedLine())')
+    $lines.Add('AddNodeTag("plan", $bgColor="#ffffff", $fontColor="#37474f", $borderColor="#b0bec5")')
+    $lines.Add('UpdateRelStyle($textColor="#455a64", $lineColor="#78909c")')
+    $lines.Add('')
+    $lines.Add('Person(browser, "Browser", "a user, or this dashboard")')
+    $nodes.Add([ordered] @{ alias = 'browser'; qualifiedName = 'browser'; kind = 'person'; name = 'Browser' })
+    $lines.Add('Boundary(sub, "Azure subscription", $type="subscription", $tags="scope") {')
+    $lines.Add("  Boundary(rg_cluster, $(Get-Quoted ([string] $System.azure.resourceGroups.cluster)), `$type=`"resource group`", `$tags=`"scope`") {")
+    $ingress = if ($System.cluster['ingressIp']) { "one public address, $([string] $System.cluster.ingressIp) (Envoy Gateway), for every environment" } else { '' }
+    $lines.Add("    Deployment_Node(cluster, $(Get-Quoted $clusterName), $(Get-Quoted "AKS cluster, $([string] $System.system.location): $nodeText"), $(Get-Quoted $ingress), `$tags=`"plan`") {")
+    $path = 'sub.rg_cluster.cluster.region_primary'
+    $lines.Add("      Deployment_Node(region_primary, $(Get-Quoted $namespace), $(Get-Quoted "namespace: environment $Environment"), $(Get-Quoted $regionSlot), `$tags=`"region`") {")
+    foreach ($app in $apps) {
+        $node = @($app.nodes) | Select-Object -First 1
+        if (-not $node) { continue }
+        $alias = "app_$(Get-DeployableAlias $app.name)_primary"
+        $lines.Add("        Container($alias, $(Get-Quoted ([string] $app.name)), $(Get-Quoted "Deployment: $($app.name)"), $(Get-Quoted $tileSlot))")
+        $nodes.Add([ordered] @{ alias = $alias; qualifiedName = "$path.$alias"; kind = 'webapp'; deployable = [string] $app.name; name = [string] $node.name; role = 'primary'; region = $namespace; regionAlias = 'region_primary'; url = [string] $node.url })
+    }
+    $database = if ($edition) { "SQL Server 2022 $edition, StatefulSet" } else { 'SQL Server, StatefulSet' }
+    $lines.Add("        ContainerDb(sqldb, `"db`", $(Get-Quoted $database), $(Get-Quoted $smallTileSlot))")
+    $nodes.Add([ordered] @{ alias = 'sqldb'; qualifiedName = "$path.sqldb"; kind = 'sql'; name = "$namespace/db"; region = $namespace; regionAlias = 'region_primary'; url = $null })
+    foreach ($static in $statics) {
+        $alias = "swa_$(Get-DeployableAlias $static.name)"
+        $lines.Add("        Container($alias, $(Get-Quoted ([string] $static.name)), $(Get-Quoted "static site: $($static.name)"), $(Get-Quoted $smallTileSlot))")
+        $address = if ($DashboardUrl[[string] $static.name]) { [string] $DashboardUrl[[string] $static.name] } else { $null }
+        $nodes.Add([ordered] @{ alias = $alias; qualifiedName = "$path.$alias"; kind = 'staticsite'; deployable = [string] $static.name; name = "$namespace/$($static.name)"; region = $namespace; regionAlias = 'region_primary'; url = $address })
+    }
+    $lines.Add('      }')
+    $lines.Add('    }')
+    $lines.Add('  }')
+    $lines.Add('}')
+
+    # The relationships, after the boundaries: the browser to each app's public address, each app to the database,
+    # the browser to the static sites.
+    foreach ($app in $apps) {
+        $node = @($app.nodes) | Select-Object -First 1
+        if (-not $node) { continue }
+        $key = Get-DeployableAlias $app.name
+        Add-Edge 'browser' "app_${key}_primary" 'public' (Get-ShortHost ([string] $node.url)) 'HTTPS' $true ([string] $node.url)
+        Add-Edge "app_${key}_primary" 'sqldb' 'sql' 'reads and writes' 'TCP 1433' $true
+    }
+    foreach ($static in $statics) {
+        Add-Edge 'browser' "swa_$(Get-DeployableAlias $static.name)" 'dashboard' 'loads the dashboard' 'HTTPS' $false
+    }
+    $lines.AddRange($edgeLines)
+    $lines.Add('@enduml')
+
+    return [ordered] @{
+        puml     = ($lines -join "`n") + "`n"
+        manifest = [ordered] @{
+            environment = $Environment
+            svg         = "$Environment.svg"
+            nodes       = @($nodes)
+            regions     = @([ordered] @{ alias = 'region_primary'; qualifiedName = $path; name = $namespace; roles = @('primary') })
+            edges       = @($edges)
+        }
+    }
+}
+
+function Test-RuntimeSvg {
+    # The handles the dashboard relies on, in an SVG PlantUML rendered: one <g class="entity"> per node (with its slot
+    # image), one <g class="cluster"> per region and one <g class="link"> per relationship, by the manifest. They are not a documented contract of PlantUML (they changed in 1.2026.3 and 1.2026.4), so every render
+    # is checked. Returns what is missing, as text; nothing when all is there.
+    param(
+        [Parameter(Mandatory)] [string] $Svg,
+        [Parameter(Mandatory)] [System.Collections.IDictionary] $Manifest
+    )
+    $document = [xml] $Svg
+    $entities = @{}
+    foreach ($group in @($document.SelectNodes("//*[local-name()='g'][@class='entity'][@data-qualified-name]"))) {
+        $entities[$group.GetAttribute('data-qualified-name')] = @($group.SelectNodes("./*[local-name()='image']")).Count
+    }
+    $clusters = @($document.SelectNodes("//*[local-name()='g'][@class='cluster'][@data-qualified-name]") | ForEach-Object { $_.GetAttribute('data-qualified-name') })
+    # A relationship is a <g class="link"> whose data-entity-1 and data-entity-2 are the ids of the two elements' groups
+    # (PlantUML's own layout engine, smetana, gives the <path> no id; Graphviz names it "<from>-to-<to>" too).
+    $aliasById = @{}
+    foreach ($group in @($document.SelectNodes("//*[local-name()='g'][@data-qualified-name][@id]"))) {
+        $aliasById[$group.GetAttribute('id')] = ($group.GetAttribute('data-qualified-name') -split '\.')[-1]
+    }
+    $paths = @(foreach ($link in @($document.SelectNodes("//*[local-name()='g'][@class='link']"))) {
+            $from = $aliasById[$link.GetAttribute('data-entity-1')]
+            $to = $aliasById[$link.GetAttribute('data-entity-2')]
+            if ($from -and $to) { "$from-to-$to" }
+        })
+    $missing = [Collections.Generic.List[string]]::new()
+    foreach ($node in $Manifest.nodes) {
+        if (-not $entities.ContainsKey($node.qualifiedName)) { $missing.Add("node $($node.qualifiedName)") }
+        elseif ($node.kind -ne 'person' -and $entities[$node.qualifiedName] -lt 1) { $missing.Add("slot of $($node.qualifiedName)") }
+    }
+    foreach ($region in $Manifest.regions) {
+        if ($clusters -notcontains $region.qualifiedName) { $missing.Add("region $($region.qualifiedName)") }
+    }
+    foreach ($edge in $Manifest.edges) {
+        if ($paths -notcontains $edge.id) { $missing.Add("relationship $($edge.id)") }
+    }
+    return @($missing)
+}
+
+function Get-PlantUmlJar {
+    # The PlantUML release jar of the pinned version, from the project's GitHub releases, into the folder; it fails when
+    # its SHA-256 is not the pinned one. Returns the path and the seconds the download took.
+    param(
+        [Parameter(Mandatory)] [string] $Version,
+        [Parameter(Mandatory)] [string] $Sha256,
+        [Parameter(Mandatory)] [string] $Folder
+    )
+    $path = Join-Path $Folder "plantuml-$Version.jar"
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    Invoke-WebRequest -Uri "https://github.com/plantuml/plantuml/releases/download/v$Version/plantuml-$Version.jar" -OutFile $path -TimeoutSec 300
+    $seconds = $clock.Elapsed.TotalSeconds
+    $actual = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+    if ($actual -ne $Sha256) {
+        Remove-Item -LiteralPath $path -Force
+        throw "plantuml-$Version.jar from GitHub has SHA-256 $actual, not the pinned $($Sha256.ToUpperInvariant()): it was not used."
+    }
+    return [ordered] @{ path = $path; seconds = $seconds; megabytes = (Get-Item -LiteralPath $path).Length / 1MB }
+}
+
+function Write-RuntimeDiagram {
+    # runtime/ in the site folder: per environment of system.json the PlantUML source (<env>.puml), the SVG
+    # (<env>.svg) and its manifest (<env>.json), and index.json, the list the dashboard starts from. One Java process
+    # renders every diagram (PlantUML's own layout engine, smetana: no Graphviz), in PlantUML's most restrictive
+    # security profile: the source includes nothing but the C4 library inside the jar. Every SVG is checked for the
+    # handles of its manifest (Test-RuntimeSvg). Java's and PlantUML's output is returned as information; a render
+    # that fails or lacks a handle throws, with that output in the message. Returns the log lines and the timings.
+    param(
+        [Parameter(Mandatory)] [hashtable] $System,
+        [Parameter(Mandatory)] [System.Collections.IDictionary] $Topology,
+        [Parameter(Mandatory)] [string] $Folder,
+        [Parameter(Mandatory)] [string] $Jar,
+        [Parameter(Mandatory)] [string] $Version,
+        [hashtable] $DashboardUrl = @{}
+    )
+    # A folder of this run only: nothing of an earlier render may be left in it.
+    $runtime = Join-Path $Folder 'runtime'
+    if (Test-Path -LiteralPath $runtime) { Remove-Item -LiteralPath $runtime -Recurse -Force }
+    New-Item -ItemType Directory -Path $runtime | Out-Null
+    $diagrams = [ordered] @{}
+    foreach ($environment in @($System.environments)) {
+        $name = [string] $environment.name
+        $diagram = ConvertTo-ClusterDiagram -System $System -Topology $Topology -Environment $name -DashboardUrl $DashboardUrl
+        $diagram.manifest.generated = $Topology.generated
+        $diagram.manifest.plantuml = $Version
+        $diagrams[$name] = $diagram
+        Set-Content -LiteralPath (Join-Path $runtime "$name.puml") -Value $diagram.puml -Encoding utf8NoBOM -NoNewline
+    }
+
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    $sources = @($diagrams.Keys | ForEach-Object { Join-Path $runtime "$_.puml" })
+    $env:PLANTUML_SECURITY_PROFILE = 'SANDBOX'
+    $PSNativeCommandUseErrorActionPreference = $false
+    $output = @(java '-Djava.awt.headless=true' -jar $Jar -tsvg -charset UTF-8 -nometadata -failfast2 @sources 2>&1 | ForEach-Object { "$_".TrimEnd() } | Where-Object { $_ })
+    $code = $LASTEXITCODE
+    $PSNativeCommandUseErrorActionPreference = $true
+    $seconds = $clock.Elapsed.TotalSeconds
+    $log = @($output | ForEach-Object { "  java: $_" })
+    if ($code -ne 0) {
+        throw "PlantUML $Version ended with exit code $code while rendering $($sources.Count) runtime diagram(s).$([Environment]::NewLine)$($log -join [Environment]::NewLine)"
+    }
+
+    $problems = [Collections.Generic.List[string]]::new()
+    foreach ($name in $diagrams.Keys) {
+        $svgPath = Join-Path $runtime "$name.svg"
+        if (-not (Test-Path -LiteralPath $svgPath)) {
+            $problems.Add("${name}: no $name.svg")
+            continue
+        }
+        $missing = @(Test-RuntimeSvg -Svg (Get-Content -LiteralPath $svgPath -Raw) -Manifest $diagrams[$name].manifest)
+        if ($missing.Count -gt 0) { $problems.Add("${name}: $($missing -join ', ')") }
+        ($diagrams[$name].manifest | ConvertTo-Json -Depth 10) + "`n" | Set-Content -LiteralPath (Join-Path $runtime "$name.json") -Encoding utf8NoBOM -NoNewline
+    }
+    if ($problems.Count -gt 0) {
+        throw "The runtime diagrams PlantUML $Version rendered lack elements the dashboard finds by name (the SVG's data-qualified-name and path ids are not a documented contract of PlantUML; pin a version that has them): $($problems -join '; ').$([Environment]::NewLine)$($log -join [Environment]::NewLine)"
+    }
+    $index = [ordered] @{
+        generated    = $Topology.generated
+        plantuml     = $Version
+        environments = @($diagrams.Keys | ForEach-Object { [ordered] @{ name = $_; manifest = "$_.json"; svg = "$_.svg" } })
+    }
+    ($index | ConvertTo-Json -Depth 5) + "`n" | Set-Content -LiteralPath (Join-Path $runtime 'index.json') -Encoding utf8NoBOM -NoNewline
+    $kilobytes = (@($diagrams.Keys | ForEach-Object { (Get-Item -LiteralPath (Join-Path $runtime "$_.svg")).Length }) | Measure-Object -Sum).Sum / 1KB
+    return [ordered] @{ log = $log; seconds = $seconds; count = $diagrams.Count; kilobytes = $kilobytes }
+}
+
+function ConvertTo-ContentManifest {
+    # The ConfigMap the site's pod mounts at /content: topology.json, and the files of runtime/ under flat names
+    # (runtime-index.json, runtime-<env>.svg, ...), which the image's web server serves as /runtime/<name>. Each value
+    # is a literal block, so Git shows the topology and the diagrams as they are.
+    param(
+        [Parameter(Mandatory)] [string] $Name,
+        [Parameter(Mandatory)] [string] $Environment,
+        [Parameter(Mandatory)] [string] $Project,
+        [Parameter(Mandatory)] [System.Collections.Specialized.OrderedDictionary] $Files
+    )
+    $lines = [Collections.Generic.List[string]]::new()
+    $lines.Add("# What the site of $Name shows in ${Environment}: step `"Write dashboard content`" of the Octopus project")
+    $lines.Add("# $Project replaces this file with every deployment. Do not edit it by hand.")
+    $lines.Add('---')
+    $lines.Add('apiVersion: v1')
+    $lines.Add('kind: ConfigMap')
+    $lines.Add('metadata:')
+    $lines.Add("  name: $Name-content")
+    $lines.Add('data:')
+    foreach ($key in $Files.Keys) {
+        $lines.Add("  ${key}: |")
+        foreach ($line in ([string] $Files[$key]).TrimEnd() -split '\r?\n') {
+            # A line of a literal block keeps its text; an empty line carries no indentation.
+            $lines.Add($(if ($line.Trim()) { "    $($line.TrimEnd())" } else { '' }))
+        }
+    }
+    return ($lines -join "`n") + "`n"
+}
+
+$environmentName = [string] $OctopusParameters['Octopus.Environment.Name']
+$slug = [string] $OctopusParameters['System.Slug']
+$repository = [string] $OctopusParameters['System.Repository']
+$domain = [string] $OctopusParameters['Cluster.Domain']
+$name = [string] $OctopusParameters['Deployable.Name']
+$release = [string] $OctopusParameters['Octopus.Release.Number']
+$deployment = [string] $OctopusParameters['Octopus.Deployment.Id']
+$project = [string] $OctopusParameters['Octopus.Project.Name']
+
+# system.json on main, through the API (raw.githubusercontent.com caches for minutes): the current desired state of
+# the whole system, not the commit of an older release.
+$headers = @{
+    Authorization          = "Bearer $([string] $OctopusParameters['GitHub.Token'])"
+    Accept                 = 'application/vnd.github+json'
+    'X-GitHub-Api-Version' = '2022-11-28'
+}
+$file = Invoke-RestMethod -Uri "https://api.github.com/repos/$repository/contents/system.json?ref=main" -Headers $headers
+$system = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(($file.content -replace '\s', ''))) | ConvertFrom-Json -AsHashtable
+$entry = @($system.deployables | Where-Object { [string] $_.name -eq $name -and [string] $_['hosting'] -eq 'staticsite' }) | Select-Object -First 1
+if (-not $entry) { Fail-Step "system.json on main has no static site named ${name} (deployables[].hosting `"staticsite`")." }
+# The site's own address, in every environment: a convention, so each environment's diagram can say "This page".
+$url = "https://$slug-$environmentName-$name.$domain"
+
+$topology = ConvertTo-ClusterTopology -System $system
+$nodeCount = 0
+foreach ($environment in $topology.environments) { foreach ($deployable in $environment.deployables) { $nodeCount += @($deployable.nodes).Count } }
+Write-Host "topology.json of $($topology.generated): $(@($topology.environments).Count) environment(s), $nodeCount node(s); pins are read from each app's kustomization on main of $($topology.system.repository)."
+
+if (-not (Get-Command java -ErrorAction SilentlyContinue)) {
+    Fail-Step "The worker container has no java, which renders the dashboard's runtime diagrams with PlantUML ${plantUmlVersion}: use a worker-tools image with a Java runtime (octopus/main.tf, worker_tools_image)."
+}
+$javaVersion = "$(@(java -version 2>&1)[0])".Trim()
+# PlantUML measures text through Java's font manager, which needs a font and three native libraries. The worker image
+# installs Java with --no-install-recommends, and on Ubuntu 24.04 openjdk-21-jre-headless only recommends them:
+# libharfbuzz0b, libfreetype6, libfontconfig1 (cmdemo2's first runtime view stopped at "libharfbuzz.so.0: cannot open
+# shared object file"). What is missing is installed from the container's own package source before the render; the
+# step's script pod runs the worker-tools container as root.
+# @() around each if: an if statement hands on an empty list as nothing at all, whose .Count fails under strict mode.
+$fonts = @(if (Get-Command fc-list -ErrorAction SilentlyContinue) { fc-list 2>$null | Where-Object { $_ } })
+$libraries = @(if (Get-Command ldconfig -ErrorAction SilentlyContinue) { ldconfig -p 2>$null | Where-Object { $_ } })
+$needed = [ordered] @{
+    'libharfbuzz0b'     = 'libharfbuzz\.so\.0'
+    'libfreetype6'      = 'libfreetype\.so\.6'
+    'libfontconfig1'    = 'libfontconfig\.so\.1'
+    'fontconfig'        = ''
+    'fonts-dejavu-core' = ''
+}
+$missing = @(foreach ($package in $needed.Keys) {
+        $library = $needed[$package]
+        if ($library) { if (-not @($libraries | Where-Object { $_ -match $library }).Count) { $package } }
+        elseif ($fonts.Count -eq 0) { $package }
+    })
+if ($missing.Count -gt 0) {
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    $env:DEBIAN_FRONTEND = 'noninteractive'
+    $PSNativeCommandUseErrorActionPreference = $false
+    $aptOutput = @(apt-get update -qq 2>&1) + @(apt-get install -y -qq --no-install-recommends @missing 2>&1)
+    $aptCode = $LASTEXITCODE
+    $PSNativeCommandUseErrorActionPreference = $true
+    $aptOutput | Where-Object { "$_".Trim() } | ForEach-Object { Write-Host "  apt: $_" }
+    if ($aptCode -ne 0) {
+        Fail-Step "Java needs $($missing -join ', ') to render the runtime diagrams with PlantUML, and installing them failed (exit code $aptCode); its output is above."
+    }
+    Write-Host ('Installed for PlantUML in {0:0.0} s: {1} (the worker container lacked them).' -f $clock.Elapsed.TotalSeconds, ($missing -join ', '))
+}
+$tools = Join-Path ([IO.Path]::GetTempPath()) "dashboard-content-$([Guid]::NewGuid().ToString('N'))"
+New-Item -ItemType Directory -Path $tools | Out-Null
+$runtimeProblem = $null
+$files = [ordered] @{ 'topology.json' = ($topology | ConvertTo-Json -Depth 10) }
+try {
+    $jar = Get-PlantUmlJar -Version $plantUmlVersion -Sha256 $plantUmlSha256 -Folder $tools
+    Write-Host ('PlantUML {0} downloaded from GitHub in {1:0.0} s ({2:0.0} MB, SHA-256 as pinned); {3}' -f $plantUmlVersion, $jar.seconds, $jar.megabytes, $javaVersion)
+    $rendered = Write-RuntimeDiagram -System $system -Topology $topology -Folder $tools -Jar $jar.path -Version $plantUmlVersion -DashboardUrl @{ $name = $url }
+    $rendered.log | ForEach-Object { Write-Host $_ }
+    Write-Host ('runtime/: {0} diagram(s) rendered and checked in {1:0.0} s ({2:0} KB of SVG)' -f $rendered.count, $rendered.seconds, $rendered.kilobytes)
+    foreach ($item in Get-ChildItem -LiteralPath (Join-Path $tools 'runtime') -File | Sort-Object Name) {
+        $files["runtime-$($item.Name)"] = Get-Content -LiteralPath $item.FullName -Raw
+    }
+}
+catch {
+    $runtimeProblem = $_.Exception.Message
+}
+finally {
+    Remove-Item -LiteralPath $tools -Recurse -Force -ErrorAction SilentlyContinue
+}
+if ($runtimeProblem) {
+    # The whole problem as information first: Octopus shows a long failure message as nothing but the exit code.
+    @("$runtimeProblem" -split '\r?\n') | Where-Object { $_.Trim() } | ForEach-Object { Write-Host $_ }
+    Fail-Step "The dashboard's runtime diagrams could not be made: $((@("$runtimeProblem" -split '\r?\n'))[0]) (the full output is above)"
+}
+
+# One commit with everything the site shows here. A ConfigMap holds 1 MiB; three environments are well under a tenth.
+$content = ConvertTo-ContentManifest -Name $name -Environment $environmentName -Project $project -Files $files
+$bytes = [Text.Encoding]::UTF8.GetBytes($content)
+if ($bytes.Length -gt 900KB) { Fail-Step "The dashboard's content is $([int] ($bytes.Length / 1KB)) KB; a ConfigMap holds 1 MiB." }
+$path = "gitops/environments/$environmentName/$name/content.yaml"
+$uri = "https://api.github.com/repos/$repository/contents/$path"
+for ($attempt = 1; ; $attempt++) {
+    $sha = $null
+    try { $sha = [string] (Invoke-RestMethod -Uri "${uri}?ref=main" -Headers $headers).sha }
+    catch { if (-not ($_.Exception.Response -and [int] $_.Exception.Response.StatusCode -eq 404)) { throw } }
+    $body = @{
+        message = "Content of $name $release in $environmentName ($deployment)"
+        content = [Convert]::ToBase64String($bytes)
+        branch  = 'main'
+    }
+    if ($sha) { $body.sha = $sha }
+    try {
+        $commit = Invoke-RestMethod -Uri $uri -Method Put -Headers $headers -Body ($body | ConvertTo-Json) -ContentType 'application/json'
+        Write-Highlight "Content of $name in ${environmentName}: $($files.Count) file(s), $([int] ($bytes.Length / 1KB)) KB, committed as $($commit.commit.html_url)"
+        break
+    }
+    catch {
+        # 409: the file changed between the read and the write; read it again.
+        if ($_.Exception.Response -and [int] $_.Exception.Response.StatusCode -eq 409 -and $attempt -lt 4) {
+            Write-Host "$path changed while writing (attempt $attempt of 4); reading it again."
+            Start-Sleep -Seconds (5 * $attempt)
+            continue
+        }
+        throw
+    }
+}
+
+# Argo CD applies the commit within a minute, and the kubelet then refreshes the mounted files (about a minute more).
+$deadline = (Get-Date).AddMinutes(8)
+$seen = ''
+while ($true) {
+    try {
+        $answer = Invoke-WebRequest -Uri "$url/topology.json" -TimeoutSec 20 -SkipHttpErrorCheck
+        $text = if ($answer.Content -is [byte[]]) { [Text.Encoding]::UTF8.GetString($answer.Content) } else { [string] $answer.Content }
+        $seen = if ($answer.StatusCode -eq 200) { try { [string] ($text | ConvertFrom-Json -AsHashtable)['generated'] } catch { 'no JSON' } } else { "HTTP $($answer.StatusCode)" }
+    }
+    catch { $seen = $_.Exception.Message }
+    if ($seen -eq [string] $topology.generated) { break }
+    if ((Get-Date) -gt $deadline) {
+        Fail-Step "$url/topology.json does not serve the topology of $($topology.generated) after 8 minutes (it answers: $seen). Argo CD applies $path, and the site's pod reads it from ConfigMap $name-content."
+    }
+    Start-Sleep -Seconds 10
+}
+Write-Highlight "$url shows $(@($topology.environments).Count) environment(s) and $nodeCount node(s), with a runtime diagram of each environment."
