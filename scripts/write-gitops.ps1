@@ -24,6 +24,14 @@
                                                        <slug>-system fills it from gitops/templates/environment
       gitops/environments/<env>/<deployable>/          the pin: step "Update deployable" writes the image tag
 
+    A deployable is an app (the first one: the work-order app with its database) or, with "hosting": "staticsite", a
+    static site (the health dashboard): a small web server at its own host name <slug>-<env>-<name>.<domain>, with no
+    database connection and with its per-environment content (topology.json, runtime/) in ConfigMap <name>-content,
+    which step "Write dashboard content" of its Octopus project commits to
+    gitops/environments/<env>/<name>/content.yaml. While the system has a static site, every app's route lets any
+    origin read it (cors.yaml): each environment's dashboard asks every environment's public health and version
+    endpoints from the visitor's browser.
+
 .EXAMPLE
     pwsh -NoProfile -File scripts/write-gitops.ps1
 #>
@@ -43,6 +51,10 @@ $registry = [string] $system.azure.registry.loginServer
 $domain = [string] $system.cluster.domain
 $environments = @($system.environments | ForEach-Object { [string] $_.name })
 $deployables = @($system.deployables)
+function Test-StaticSite { param($Deployable) [string] $Deployable['hosting'] -eq 'staticsite' }
+# The first deployable has the environment's own host name, <slug>-<env>.<domain>; every other one <slug>-<env>-<name>.
+function Get-HostSuffix { param($Deployable) if ([string] $Deployable.name -eq [string] $deployables[0].name) { '' } else { "-$($Deployable.name)" } }
+$hasStaticSite = @($deployables | Where-Object { Test-StaticSite $_ }).Count -gt 0
 
 function Set-File {
     param([string] $Path, [string] $Content, [switch] $KeepExisting)
@@ -207,7 +219,14 @@ spec:
 # One HTTPS listener per host name; cert-manager issues the certificate each listener names (the Gateway's
 # cert-manager.io/cluster-issuer annotation). Only the namespace of an environment may attach a route to its listener.
 $listeners = [Collections.Generic.List[string]]::new()
-foreach ($entry in @(@{ name = 'argocd'; host = "argocd-$slug.$domain"; namespace = 'argocd' }) + @($environments | ForEach-Object { @{ name = $_; host = "$slug-$_.$domain"; namespace = "$slug-$_" } })) {
+$hosts = @(@{ name = 'argocd'; host = "argocd-$slug.$domain"; namespace = 'argocd' })
+foreach ($environment in $environments) {
+    foreach ($deployable in $deployables) {
+        $suffix = Get-HostSuffix $deployable
+        $hosts += @{ name = "$environment$suffix"; host = "$slug-$environment$suffix.$domain"; namespace = "$slug-$environment" }
+    }
+}
+foreach ($entry in $hosts) {
     $listeners.Add(@"
     - name: https-$($entry.name)
       protocol: HTTPS
@@ -230,7 +249,8 @@ foreach ($entry in @(@{ name = 'argocd'; host = "argocd-$slug.$domain"; namespac
 Set-File 'gitops/platform/gateway.yaml' @"
 $generated
 # The ingress of the cluster: one Envoy proxy behind the public IP the seed created (so the host names are known before
-# the cluster exists), HTTP redirected to HTTPS, and one HTTPS listener per environment and for the Argo CD web UI.
+# the cluster exists), HTTP redirected to HTTPS, and one HTTPS listener per host name: each environment's app, each
+# further deployable of it, and the Argo CD web UI.
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: GatewayClass
@@ -433,6 +453,7 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources: []
 "@
+        $content = if (Test-StaticSite $deployable) { "`n  - content.yaml" } else { '' }
         Set-File "gitops/environments/$environment/$($deployable.name)/kustomization.yaml" -KeepExisting @"
 # The version of $($deployable.name) in ${environment}: step "Update deployable" of the Octopus project
 # $slug-$($deployable.name) writes newTag. Do not edit it by hand; promote a release in Octopus.
@@ -441,11 +462,26 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: $namespace
 resources:
-  - ../system/apps/$($deployable.name)
+  - ../system/apps/$($deployable.name)$content
 images:
   - name: $registry/$slug/$($deployable.name)
     newTag: 0.0.0-placeholder
 "@
+        if (Test-StaticSite $deployable) {
+            # Before the first deployment of the site: a topology without environments, so the pod has its ConfigMap.
+            Set-File "gitops/environments/$environment/$($deployable.name)/content.yaml" -KeepExisting @"
+# What the site of $($deployable.name) shows in ${environment}: step "Write dashboard content" of the Octopus project
+# $slug-$($deployable.name) replaces this file with every deployment. Do not edit it by hand.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: $($deployable.name)-content
+data:
+  topology.json: |
+    { "environments": [] }
+"@
+        }
     }
 }
 
@@ -453,6 +489,10 @@ images:
 foreach ($deployable in $deployables) {
     $name = [string] $deployable.name
     $folder = "gitops/templates/environment/apps/$name"
+    $suffix = Get-HostSuffix $deployable
+    $port = [int] $deployable.port
+    $static = Test-StaticSite $deployable
+    $cors = $hasStaticSite -and -not $static
     Set-File "$folder/kustomization.yaml" @"
 $generated
 ---
@@ -460,9 +500,97 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - deployment.yaml
-  - route.yaml
+  - route.yaml$(if ($cors) { "`n  - cors.yaml" })
 "@
-    Set-File "$folder/deployment.yaml" @"
+    if ($static) {
+        Set-File "$folder/deployment.yaml" @"
+$generated
+# Deployable ${name}, a static site. The image has no tag here: gitops/environments/<env>/$name/kustomization.yaml pins
+# it. The web server of the image serves the site, and /topology.json and /runtime/ from ConfigMap $name-content
+# (mounted at /content; the kubelet refreshes the files when the ConfigMap changes, without a restart).
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: $name
+  labels:
+    app.kubernetes.io/name: $name
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: $name
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: $name
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: $name
+          image: $registry/$slug/$name
+          ports:
+            - name: http
+              containerPort: $port
+              protocol: TCP
+          volumeMounts:
+            - name: content
+              mountPath: /content
+              readOnly: true
+          startupProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 2
+            failureThreshold: 60
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+      volumes:
+        - name: content
+          configMap:
+            name: $name-content
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: $name
+  labels:
+    app.kubernetes.io/name: $name
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: $name
+  ports:
+    - name: http
+      port: $port
+      targetPort: http
+      protocol: TCP
+"@
+    }
+    else {
+        Set-File "$folder/deployment.yaml" @"
 $generated
 # Deployable ${name}. The image has no tag here: gitops/environments/<env>/$name/kustomization.yaml pins it.
 ---
@@ -497,19 +625,31 @@ spec:
           image: $registry/$slug/$name
           ports:
             - name: http
-              containerPort: $([int] $deployable.port)
+              containerPort: $port
               protocol: TCP
           env:
             - name: ASPNETCORE_HTTP_PORTS
-              value: "$([int] $deployable.port)"
+              value: "$port"
             - name: ConnectionStrings__SqlConnectionString
               valueFrom:
                 secretKeyRef:
                   name: db-credentials
                   key: app-connection-string
-            # No telemetry collector in the cluster: keep the app's exporter off.
+            # No OpenTelemetry collector in the cluster: the app's OTLP exporter stays off.
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: ""
+            # Telemetry goes to the environment's Application Insights under the app's own name, when the
+            # environment has capability "telemetry": the cluster job then keeps the connection string in Secret
+            # "telemetry" (it never reaches Git), and the variable names that Secret. Without the capability the
+            # variable names a Secret that does not exist, the app gets no connection string and exports nothing.
+            - name: OTEL_SERVICE_NAME
+              value: "$slug-$name"
+            - name: APPLICATIONINSIGHTS_CONNECTION_STRING
+              valueFrom:
+                secretKeyRef:
+                  name: "#{Telemetry.Secret}"
+                  key: connection-string
+                  optional: true
           startupProbe:
             tcpSocket:
               port: http
@@ -544,10 +684,11 @@ spec:
     app.kubernetes.io/name: $name
   ports:
     - name: http
-      port: $([int] $deployable.port)
+      port: $port
       targetPort: http
       protocol: TCP
 "@
+    }
     Set-File "$folder/route.yaml" @"
 $generated
 ---
@@ -561,14 +702,41 @@ spec:
       kind: Gateway
       name: platform-gateway
       namespace: platform-ingress
-      sectionName: "https-#{Octopus.Environment.Name}"
+      sectionName: "https-#{Octopus.Environment.Name}$suffix"
   hostnames:
-    - "#{System.Slug}-#{Octopus.Environment.Name}.#{Cluster.Domain}"
+    - "#{System.Slug}-#{Octopus.Environment.Name}$suffix.#{Cluster.Domain}"
   rules:
     - backendRefs:
         - name: $name
-          port: $([int] $deployable.port)
+          port: $port
 "@
+    $corsFile = Join-Path $Root $folder 'cors.yaml'
+    if ($cors) {
+        Set-File "$folder/cors.yaml" @"
+$generated
+# Any origin may read this app's answers (GET only, no credentials): the health dashboard is a page in the visitor's
+# browser, and each environment's dashboard asks the public health and version endpoints of every environment.
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: $name-cors
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: $name
+  cors:
+    allowOrigins:
+      - "*"
+    allowMethods:
+      - GET
+    maxAge: 10m
+"@
+    }
+    elseif (Test-Path -LiteralPath $corsFile) {
+        Remove-Item -LiteralPath $corsFile
+    }
 }
 
 Write-Host "PASS gitops/ written for $($environments -join ', ') and $(@($deployables | ForEach-Object { $_.name }) -join ', ')"

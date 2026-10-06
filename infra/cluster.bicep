@@ -3,6 +3,8 @@
 // resource group, as id-<slug>-cluster. The seed created what the cluster needs first: its own identity
 // (id-<slug>-aks), the kubelet identity that pulls the app images (id-<slug>-kubelet), the ingress IP, and the
 // storage account and identity of the SQL backups (this stack adds that identity's federated credentials).
+// With capability "telemetry" an environment gets its own Log Analytics workspace and Application Insights here; the
+// cluster job hands the connection string to the environment's namespace as a Secret (cluster/apply-cluster.ps1).
 targetScope = 'resourceGroup'
 
 var system = loadJsonContent('../system.json')
@@ -86,6 +88,52 @@ resource backupCredentials 'Microsoft.ManagedIdentity/userAssignedIdentities/fed
       issuer: aks.properties.oidcIssuerProfile.issuerURL
       subject: 'system:serviceaccount:${slug}-${environment.name}:db-backup'
       audiences: ['api://AzureADTokenExchange']
+    }
+  }
+]
+
+// Capability "telemetry" (system.json environments[].capabilities): where the app's OpenTelemetry export lands, one
+// component per environment so each environment's numbers and its daily cap are its own. The plan identity, a reader
+// of this group, may query them: the capability checks do.
+// any(): the type Bicep reads from system.json has no "capabilities" while no environment has the key (BCP053).
+var telemetryEnvironments = filter(system.environments, e => contains(any(e).?capabilities ?? [], 'telemetry'))
+
+resource workspaces 'Microsoft.OperationalInsights/workspaces@2023-09-01' = [
+  for environment in telemetryEnvironments: {
+    name: 'log-${slug}-${environment.name}'
+    location: system.system.location
+    tags: {
+      system: slug
+      purpose: 'demo'
+      environment: environment.name
+      tier: environment.tier
+    }
+    properties: {
+      sku: {
+        name: 'PerGB2018'
+      }
+      retentionInDays: 30
+      workspaceCapping: {
+        dailyQuotaGb: 1
+      }
+    }
+  }
+]
+
+resource insights 'Microsoft.Insights/components@2020-02-02' = [
+  for (environment, i) in telemetryEnvironments: {
+    name: 'appi-${slug}-${environment.name}'
+    location: system.system.location
+    kind: 'web'
+    tags: {
+      system: slug
+      purpose: 'demo'
+      environment: environment.name
+      tier: environment.tier
+    }
+    properties: {
+      Application_Type: 'web'
+      WorkspaceResourceId: workspaces[i].id
     }
   }
 ]

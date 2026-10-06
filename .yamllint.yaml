@@ -1,9 +1,12 @@
 # yamllint configuration of the system repository (job env-checks).
 extends: default
 
+# content.yaml of a static site is written by its deployment: a ConfigMap whose values are files (JSON, SVG) as they
+# are, long lines included.
 ignore: |
   .git/
   .terraform/
+  gitops/environments/*/*/content.yaml
 
 rules:
   line-length:

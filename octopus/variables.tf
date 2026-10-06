@@ -12,7 +12,7 @@ locals {
     for project, id in local.project_ids : [
       { key = "${project}-slug", project = id, name = "System.Slug", value = local.slug, environment = null },
       { key = "${project}-repository", project = id, name = "System.Repository", value = local.repository, environment = null },
-      { key = "${project}-deployables", project = id, name = "System.Deployables", value = jsonencode([for d in local.system.deployables : { name = d.name, healthPath = d.healthPath }]), environment = null },
+      { key = "${project}-deployables", project = id, name = "System.Deployables", value = jsonencode([for d in local.system.deployables : { name = d.name, healthPath = d.healthPath, hostSuffix = local.host_suffix[d.name], hosting = try(d.hosting, "") }]), environment = null },
       { key = "${project}-registry", project = id, name = "Azure.RegistryServer", value = local.system.azure.registry.loginServer, environment = null },
       { key = "${project}-domain", project = id, name = "Cluster.Domain", value = local.system.cluster.domain, environment = null },
       { key = "${project}-database", project = id, name = "Database.Name", value = local.slug, environment = null },
@@ -30,6 +30,9 @@ locals {
     { key = "system-backup-client", project = octopusdeploy_project.system.id, name = "Backup.ClientId", value = local.system.azure.identities.backup.clientId, environment = null },
     [for name, e in local.environments : [
       { key = "system-tier-${name}", project = octopusdeploy_project.system.id, name = "Environment.Tier", value = e.tier, environment = name },
+      # Capability "telemetry": the app reads its Application Insights connection string from the Secret this names.
+      # The cluster job keeps Secret "telemetry" in the namespaces that have the capability; "telemetry-off" never exists.
+      { key = "system-telemetry-${name}", project = octopusdeploy_project.system.id, name = "Telemetry.Secret", value = contains(try(e.capabilities, []), "telemetry") ? "telemetry" : "telemetry-off", environment = name },
       # The nightly backups start ten minutes apart, in the order of the environments.
       { key = "system-backup-minute-${name}", project = octopusdeploy_project.system.id, name = "Backup.Minute", value = tostring((e.sort_order * 10) % 60), environment = name },
       { key = "system-cpu-${name}", project = octopusdeploy_project.system.id, name = "App.CpuLimit", value = "${floor(tonumber(try(e.appCpu, "0.5")) * 1000)}m", environment = name },
