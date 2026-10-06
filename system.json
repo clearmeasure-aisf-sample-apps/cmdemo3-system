@@ -137,6 +137,12 @@
       "hosting": "staticsite",
       "port": 8080,
       "healthPath": "/"
+    },
+    {
+      "name": "status",
+      "repository": "cmdemo3-status",
+      "hosting": "staticwebapp",
+      "healthPath": "/"
     }
   ],
   "environments": [
