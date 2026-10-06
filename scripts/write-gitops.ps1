@@ -15,7 +15,9 @@
       gitops/argocd/apps/platform.yaml                 Envoy Gateway, cert-manager and gitops/platform
       gitops/argocd/apps/environment-<env>.yaml        <slug>-system-<env> and <slug>-<deployable>-<env>, with the
                                                        annotations that map them to their Octopus project and environment
-      gitops/platform/gateway.yaml                     the Gateway: one HTTPS listener per environment and for Argo CD
+      gitops/platform/gateway.yaml                     the Gateway: one HTTPS listener per host name (each environment's
+                                                       app and in-cluster site, Argo CD, the cluster's status file)
+      gitops/platform/kustomization.yaml               what Argo CD applies of gitops/platform
       gitops/templates/environment/apps/<deployable>/  the deployable's Deployment, Service and route (Octostache)
 
     And, only when missing, the folders Octopus writes to afterwards:
@@ -31,6 +33,11 @@
     gitops/environments/<env>/<name>/content.yaml. While the system has a static site, every app's route lets any
     origin read it (cors.yaml): each environment's dashboard asks every environment's public health and version
     endpoints from the visitor's browser.
+
+    With "hosting": "staticwebapp" the dashboard is an Azure Static Web App outside the cluster (infra/cluster.bicep):
+    nothing of gitops/ describes it. Either kind of dashboard makes the apps answer other origins and makes the
+    cluster report its own status: gitops/platform/cluster-status.yaml (a collector that reads nodes, pods and their
+    usage, and a web server for its one file at https://<slug>-cluster.<domain>/cluster.json) is applied only then.
 
 .EXAMPLE
     pwsh -NoProfile -File scripts/write-gitops.ps1
@@ -50,11 +57,15 @@ $repositoryUrl = "https://github.com/$($system.system.githubOrg)/$($system.syste
 $registry = [string] $system.azure.registry.loginServer
 $domain = [string] $system.cluster.domain
 $environments = @($system.environments | ForEach-Object { [string] $_.name })
-$deployables = @($system.deployables)
+# What runs in the cluster. A deployable with hosting "staticwebapp" does not (the dashboard on Azure Static Web
+# Apps): nothing of gitops/ describes it, except that it too is a dashboard that reads the apps and the cluster.
+$deployables = @($system.deployables | Where-Object { [string] $_['hosting'] -ne 'staticwebapp' })
+$sites = @($system.deployables | Where-Object { [string] $_['hosting'] -eq 'staticwebapp' })
 function Test-StaticSite { param($Deployable) [string] $Deployable['hosting'] -eq 'staticsite' }
 # The first deployable has the environment's own host name, <slug>-<env>.<domain>; every other one <slug>-<env>-<name>.
 function Get-HostSuffix { param($Deployable) if ([string] $Deployable.name -eq [string] $deployables[0].name) { '' } else { "-$($Deployable.name)" } }
-$hasStaticSite = @($deployables | Where-Object { Test-StaticSite $_ }).Count -gt 0
+# A dashboard, in the cluster or outside it: the apps then answer other origins, and the cluster reports its status.
+$hasDashboard = $sites.Count -gt 0 -or @($deployables | Where-Object { Test-StaticSite $_ }).Count -gt 0
 
 function Set-File {
     param([string] $Path, [string] $Content, [switch] $KeepExisting)
@@ -220,6 +231,7 @@ spec:
 # cert-manager.io/cluster-issuer annotation). Only the namespace of an environment may attach a route to its listener.
 $listeners = [Collections.Generic.List[string]]::new()
 $hosts = @(@{ name = 'argocd'; host = "argocd-$slug.$domain"; namespace = 'argocd' })
+if ($hasDashboard) { $hosts += @{ name = 'cluster'; host = "$slug-cluster.$domain"; namespace = 'cluster-status' } }
 foreach ($environment in $environments) {
     foreach ($deployable in $deployables) {
         $suffix = Get-HostSuffix $deployable
@@ -343,6 +355,51 @@ spec:
     - backendRefs:
         - name: argocd-server
           port: 80
+$(if ($hasDashboard) { @"
+---
+# The cluster's status file for the health dashboard (cluster-status.yaml): one file, readable by any origin.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: cluster-status
+  namespace: cluster-status
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: platform-gateway
+      namespace: platform-ingress
+      sectionName: https-cluster
+  hostnames:
+    - $slug-cluster.$domain
+  rules:
+    - backendRefs:
+        - name: cluster-status
+          port: 80
+"@ })
+"@
+
+# What Argo CD applies of gitops/platform. The status collector only while the system has a dashboard to read it; its
+# script and its web server's configuration go into a ConfigMap whose name carries their hash, so a change restarts it.
+Set-File 'gitops/platform/kustomization.yaml' @"
+$generated
+# The platform of the cluster, applied by the Argo CD Application "platform" (gitops/argocd/apps/platform.yaml).
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - gateway.yaml
+  - issuers.yaml
+  - worker-rbac.yaml
+$(if ($hasDashboard) { @'
+  - cluster-status.yaml
+configMapGenerator:
+  - name: cluster-status-files
+    namespace: cluster-status
+    files:
+      - collect-status.ps1
+      - nginx.conf=cluster-status-nginx.conf
+'@ })
 "@
 
 foreach ($environment in $environments) {
@@ -492,7 +549,7 @@ foreach ($deployable in $deployables) {
     $suffix = Get-HostSuffix $deployable
     $port = [int] $deployable.port
     $static = Test-StaticSite $deployable
-    $cors = $hasStaticSite -and -not $static
+    $cors = $hasDashboard -and -not $static
     Set-File "$folder/kustomization.yaml" @"
 $generated
 ---

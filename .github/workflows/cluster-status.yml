@@ -1,0 +1,63 @@
+# Azure's own facts about the system's AKS cluster, for the health dashboard's cluster view (runtime aks-argocd):
+# scripts/write-cluster-status.ps1 reads Azure Resource Health's verdict, whether the cluster runs, its node pools and
+# its platform metrics, as the plan identity (a reader of the cluster's resource group). The result is aks.json, the
+# only file of branch "cluster-status": one commit, replaced (force-pushed) by every run, so main gets no commits and
+# the branch no history. The dashboard reads it from the browser at
+# https://raw.githubusercontent.com/<org>/<repository>/cluster-status/aks.json (the repository is public), next to
+# the live status the cluster serves about itself: these facts still arrive when the cluster is stopped or broken.
+# Every ten minutes (GitHub starts scheduled runs late under load, and serves the file from a cache of about five
+# minutes: the page shows how old the facts are), after every run of workflow system, and on demand.
+# Credentials: GitHub OIDC to Azure (environment "capabilities", read-only), and this workflow's own token to push the
+# branch. No stored secret.
+name: cluster-status
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_run:
+    workflows: ["system"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: cluster-status
+  cancel-in-progress: false
+
+jobs:
+  cluster-status:
+    runs-on: ubuntu-24.04
+    environment: capabilities
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6.0.1
+
+      - uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID_PLAN }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Write aks.json
+        shell: pwsh
+        run: ./scripts/write-cluster-status.ps1 -Path "${{ runner.temp }}/aks.json"
+
+      # One commit without a parent, made from the file alone (no checkout of the branch), as github-actions[bot] with
+      # the token the checkout step kept.
+      - name: Publish on branch cluster-status
+        env:
+          FACTS: ${{ runner.temp }}/aks.json
+          GIT_AUTHOR_NAME: "github-actions[bot]"
+          GIT_AUTHOR_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
+          GIT_COMMITTER_NAME: "github-actions[bot]"
+          GIT_COMMITTER_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
+        run: |
+          set -euo pipefail
+          blob=$(git hash-object -w "$FACTS")
+          tree=$(printf '100644 blob %s\taks.json\n' "$blob" | git mktree)
+          commit=$(git commit-tree "$tree" -m "AKS facts of $(jq --raw-output .generated "$FACTS")")
+          git push --quiet --force origin "$commit:refs/heads/cluster-status"
+          echo "aks.json published on branch cluster-status ($commit)."

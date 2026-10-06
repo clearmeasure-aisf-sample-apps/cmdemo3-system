@@ -1,0 +1,161 @@
+# The cluster's status for the health dashboard (applied only while system.json has a dashboard: the folder's
+# kustomization, which scripts/write-gitops.ps1 generates, then lists this file). A collector reads the nodes, the
+# pods and their use of CPU and memory from the Kubernetes API every 15 seconds and writes cluster.json; a web server
+# next to it serves that one file at https://<slug>-cluster.<domain>/cluster.json (the route is in gateway.yaml). The
+# page reads it from the visitor's browser: names, states and usage, nothing of what a pod is configured with.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cluster-status
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cluster-status
+  namespace: cluster-status
+---
+# Read-only, and only what the file shows: no Secret, no ConfigMap, no logs.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cluster-status-reader
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "pods", "persistentvolumeclaims"]
+    verbs: ["get", "list"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["nodes", "pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cluster-status-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-status-reader
+subjects:
+  - kind: ServiceAccount
+    name: cluster-status
+    namespace: cluster-status
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cluster-status
+  namespace: cluster-status
+  labels:
+    app: cluster-status
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cluster-status
+  template:
+    metadata:
+      labels:
+        app: cluster-status
+    spec:
+      serviceAccountName: cluster-status
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: collector
+          image: mcr.microsoft.com/powershell:lts-alpine-3.20
+          command: ["pwsh", "-NoProfile", "-File", "/files/collect-status.ps1"]
+          env:
+            # The API server's certificate is checked against the cluster's own authority, and only that one.
+            - name: SSL_CERT_FILE
+              value: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+            - name: HOME
+              value: /tmp
+            - name: POWERSHELL_TELEMETRY_OPTOUT
+              value: "1"
+            - name: POWERSHELL_UPDATECHECK
+              value: "Off"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 20m
+              memory: 96Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi
+          volumeMounts:
+            - name: files
+              mountPath: /files
+              readOnly: true
+            - name: out
+              mountPath: /out
+            - name: tmp
+              mountPath: /tmp
+        - name: web
+          image: nginxinc/nginx-unprivileged:1.29-alpine
+          ports:
+            - name: http
+              containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          # Ready once the collector has written its first file.
+          readinessProbe:
+            httpGet:
+              path: /cluster.json
+              port: http
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 5m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          volumeMounts:
+            - name: files
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: nginx.conf
+              readOnly: true
+            - name: out
+              mountPath: /out
+              readOnly: true
+            - name: web-tmp
+              mountPath: /tmp
+      volumes:
+        - name: files
+          configMap:
+            name: cluster-status-files
+        - name: out
+          emptyDir:
+            medium: Memory
+            sizeLimit: 8Mi
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: web-tmp
+          emptyDir:
+            sizeLimit: 8Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cluster-status
+  namespace: cluster-status
+spec:
+  selector:
+    app: cluster-status
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

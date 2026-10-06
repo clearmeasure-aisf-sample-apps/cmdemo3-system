@@ -53,8 +53,10 @@ if (-not $ListChecks) {
     $first = $environments[0]
     $clusterGroup = [string] $system.azure.resourceGroups.cluster
     $domain = [string] $system.cluster.domain
-    # A static site (hosting "staticsite": the health dashboard) is no app: the apps are the others.
-    $apps = @($system.deployables | Where-Object { [string] $_['hosting'] -ne 'staticsite' })
+    # The health dashboard (hosting "staticsite" in the cluster, "staticwebapp" outside it) is no app: the apps are the
+    # others.
+    $apps = @($system.deployables | Where-Object { [string] $_['hosting'] -notin 'staticsite', 'staticwebapp' })
+    $dashboards = @($system.deployables | Where-Object { [string] $_['hosting'] -in 'staticsite', 'staticwebapp' })
     $telemetryEnvironments = @($system.environments | Where-Object { @($_['capabilities']) -contains 'telemetry' } | ForEach-Object { [string] $_.name })
     # Between classes the cluster is stopped (cluster.dormant): what only the running cluster can show is skipped.
     $dormant = $system.cluster.ContainsKey('dormant') -and [bool] $system.cluster.dormant
@@ -153,6 +155,14 @@ function Assert-Awake {
 }
 function Get-DeployableUrl([string] $Name, [string] $Environment) {
     # A deployable's public address by the runtime's convention: the first one has the environment's own host name.
+    # A site outside the cluster (hosting "staticwebapp") is where Azure put it: its deployment recorded the address
+    # in Git (gitops/environments/<env>/<name>/site.json).
+    $entry = @($system.deployables | Where-Object { [string] $_.name -eq $Name }) | Select-Object -First 1
+    if ($entry -and [string] $entry['hosting'] -eq 'staticwebapp') {
+        $record = Get-RepoFile $systemRepo "gitops/environments/$Environment/$Name/site.json"
+        if ($record -notmatch '"url"\s*:\s*"(https://[^"]+)"') { throw "gitops/environments/$Environment/$Name/site.json records no address" }
+        return $Matches[1]
+    }
     $suffix = if ($Name -eq [string] $system.deployables[0].name) { '' } else { "-$Name" }
     "https://$slug-$Environment$suffix.$domain"
 }
@@ -495,40 +505,43 @@ $checks = [ordered] @{
         "metrics of $role arriving in Application Insights in $($telemetry.On -join ', ')$(if ($telemetry.Waiting.Count -gt 0) { "; $($telemetry.Waiting -join ', ') get it with the system release" })"
     }
     'CAP-075' = {
-        # One page shows every node: the dashboard (the deployable with hosting "staticsite") serves, in every
-        # environment it runs in, the topology its deployment committed: every environment of system.json and, for
-        # each app, its node <namespace>/<app>. A topology older than system.json fails: deploy the dashboard again.
-        # Its Runtime view has, in runtime/index.json, every environment with a manifest and an SVG the site serves.
-        $dashboard = @($system.deployables | Where-Object { [string] $_['hosting'] -eq 'staticsite' }) | Select-Object -First 1
-        if (-not $dashboard) { Skip-Check 'no deployable with hosting staticsite yet' }
-        Assert-Awake
-        $dashboardName = [string] $dashboard.name
+        # One page shows every node: every dashboard of the system (a deployable with hosting "staticsite", in the
+        # cluster, or "staticwebapp", outside it) serves, in every environment it runs in, the topology its deployment
+        # wrote: every environment of system.json and, for each app, its node <namespace>/<app>. A topology older than
+        # system.json fails: deploy the dashboard again. Its Runtime view has, in runtime/index.json, every environment
+        # with a manifest and an SVG the site serves.
+        if ($dashboards.Count -eq 0) { Skip-Check 'no dashboard (a deployable with hosting staticsite or staticwebapp) yet' }
         $want = @(foreach ($e in $environments) { foreach ($app in $apps) { "$e/$($app.name)/$slug-$e/$($app.name)" } })
-        $shown = foreach ($e in $environments) {
-            if (-not (Find-LastDeployment "$slug-$dashboardName" $e)) { continue }
-            $url = Get-DeployableUrl $dashboardName $e
-            $topology = Get-Text (Invoke-WebRequest -Uri "$url/topology.json" -TimeoutSec 120) | ConvertFrom-Json -AsHashtable
-            $listed = @($topology['environments'] | Where-Object { $_ })
-            $absent = @($environments | Where-Object { @($listed | ForEach-Object { [string] $_['name'] }) -notcontains $_ })
-            Assert-That ($absent.Count -eq 0) "the dashboard in $e does not list $($absent -join ', '): deploy the release of $slug-$dashboardName to $e again"
-            $got = @(foreach ($entry in $listed) { foreach ($d in @($entry['deployables'] | Where-Object { $_ })) { foreach ($node in @($d['nodes'] | Where-Object { $_ })) { "$($entry['name'])/$($d['name'])/$($node['name'])" } } })
-            $lost = @($want | Where-Object { $got -notcontains $_ })
-            Assert-That ($lost.Count -eq 0) "the dashboard in $e does not list the node(s) $($lost -join ', '): deploy the release of $slug-$dashboardName to $e again"
-            $answer = Invoke-WebRequest -Uri "$url/runtime/index.json" -TimeoutSec 120 -SkipHttpErrorCheck
-            Assert-That ($answer.StatusCode -eq 200) "the dashboard in $e has no runtime/index.json (HTTP $($answer.StatusCode)): deploy the release of $slug-$dashboardName to $e again"
-            $drawn = @((Get-Text $answer | ConvertFrom-Json -AsHashtable)['environments'] | Where-Object { $_ })
-            $undrawn = @($environments | Where-Object { @($drawn | ForEach-Object { [string] $_['name'] }) -notcontains $_ })
-            Assert-That ($undrawn.Count -eq 0) "the Runtime view in $e has no diagram of $($undrawn -join ', '): deploy the release of $slug-$dashboardName to $e again"
-            foreach ($entry in $drawn) {
-                foreach ($file in @([string] $entry['manifest'], [string] $entry['svg'])) {
-                    $part = Invoke-WebRequest -Uri "$url/runtime/$file" -TimeoutSec 120 -SkipHttpErrorCheck
-                    Assert-That ($part.StatusCode -eq 200 -and $part.RawContentLength -gt 0) "the Runtime view in $e does not serve runtime/$file (HTTP $($part.StatusCode))"
+        $shown = foreach ($dashboard in $dashboards) {
+            $dashboardName = [string] $dashboard.name
+            # A site outside the cluster answers while the cluster sleeps; one inside it does not.
+            if ([string] $dashboard.hosting -eq 'staticsite' -and $dormant) { continue }
+            foreach ($e in $environments) {
+                if (-not (Find-LastDeployment "$slug-$dashboardName" $e)) { continue }
+                $url = Get-DeployableUrl $dashboardName $e
+                $topology = Get-Text (Invoke-WebRequest -Uri "$url/topology.json" -TimeoutSec 120) | ConvertFrom-Json -AsHashtable
+                $listed = @($topology['environments'] | Where-Object { $_ })
+                $absent = @($environments | Where-Object { @($listed | ForEach-Object { [string] $_['name'] }) -notcontains $_ })
+                Assert-That ($absent.Count -eq 0) "$dashboardName in $e does not list $($absent -join ', '): deploy the release of $slug-$dashboardName to $e again"
+                $got = @(foreach ($entry in $listed) { foreach ($d in @($entry['deployables'] | Where-Object { $_ })) { foreach ($node in @($d['nodes'] | Where-Object { $_ })) { "$($entry['name'])/$($d['name'])/$($node['name'])" } } })
+                $lost = @($want | Where-Object { $got -notcontains $_ })
+                Assert-That ($lost.Count -eq 0) "$dashboardName in $e does not list the node(s) $($lost -join ', '): deploy the release of $slug-$dashboardName to $e again"
+                $answer = Invoke-WebRequest -Uri "$url/runtime/index.json" -TimeoutSec 120 -SkipHttpErrorCheck
+                Assert-That ($answer.StatusCode -eq 200) "$dashboardName in $e has no runtime/index.json (HTTP $($answer.StatusCode)): deploy the release of $slug-$dashboardName to $e again"
+                $drawn = @((Get-Text $answer | ConvertFrom-Json -AsHashtable)['environments'] | Where-Object { $_ })
+                $undrawn = @($environments | Where-Object { @($drawn | ForEach-Object { [string] $_['name'] }) -notcontains $_ })
+                Assert-That ($undrawn.Count -eq 0) "the Runtime view of $dashboardName in $e has no diagram of $($undrawn -join ', '): deploy the release of $slug-$dashboardName to $e again"
+                foreach ($entry in $drawn) {
+                    foreach ($file in @([string] $entry['manifest'], [string] $entry['svg'])) {
+                        $part = Invoke-WebRequest -Uri "$url/runtime/$file" -TimeoutSec 120 -SkipHttpErrorCheck
+                        Assert-That ($part.StatusCode -eq 200 -and $part.RawContentLength -gt 0) "the Runtime view of $dashboardName in $e does not serve runtime/$file (HTTP $($part.StatusCode))"
+                    }
                 }
+                "$dashboardName $e $url"
             }
-            "$e $url"
         }
-        if (-not $shown) { Skip-Check "no successful $slug-$dashboardName deployment yet" }
-        "$($environments.Count) environment(s) and $($want.Count) node(s) on one page, with a runtime diagram each: $($shown -join '; ')"
+        if (-not $shown) { Skip-Check 'no successful deployment of a dashboard that answers now' }
+        "$($environments.Count) environment(s) and $($want.Count) node(s) on one page, with a runtime diagram each: $(@($shown) -join '; ')"
     }
     'CAP-076' = {
         # The delivery tool shows each environment's health: a "Health report" run of the last three hours succeeded
@@ -626,6 +639,47 @@ $checks = [ordered] @{
         $build = Get-RepoFile $systemRepo '.github/workflows/system.yml'; $nightly = Get-RepoFile $systemRepo '.github/workflows/capabilities.yml'
         Assert-That ($build -match 'uses: \./\.github/workflows/capabilities\.yml' -and $nightly -match 'schedule:') 'the checks do not run with every system build and nightly'
         "$($checks.Count) checks, after every system build and nightly"
+    }
+    'CAP-082' = {
+        # The platform under the environments is on the page too, from two sources a browser can read. Live, from the
+        # cluster itself (the collector of gitops/platform/cluster-status.yaml): a file no older than two minutes, any
+        # origin may read it, every node of system.json with its CPU and memory use, and pods in every environment's
+        # namespace. From outside it (workflow cluster-status, branch "cluster-status"): Azure's facts about the AKS
+        # service, no older than an hour, with Resource Health's verdict and whether the cluster runs. The check proves
+        # that both report, not that all is healthy; while the cluster sleeps, that Azure's facts say so.
+        if ($dashboards.Count -eq 0) { Skip-Check 'no dashboard yet: the cluster reports its status only for one' }
+        $branches = @(gh api "repos/$systemRepo/branches" --paginate --jq '.[].name')
+        if ($branches -notcontains 'cluster-status') { Skip-Check 'workflow cluster-status has not published branch cluster-status yet' }
+        $facts = Get-RepoFile $systemRepo 'aks.json?ref=cluster-status'
+        Assert-That ($facts -match '"generated"\s*:\s*"([^"]+)"') 'aks.json on branch cluster-status has no time'
+        $age = [datetimeoffset]::UtcNow - [datetimeoffset]::Parse($Matches[1], [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal)
+        Assert-That ($age.TotalMinutes -lt 60) "Azure's facts about the cluster are $([int] $age.TotalMinutes) minutes old: workflow cluster-status is not running"
+        $service = $facts | ConvertFrom-Json -AsHashtable
+        Assert-That ($service['availability'] -is [hashtable] -and $service.availability['state'] -and $service['powerState']) 'aks.json has no verdict of Azure Resource Health or no power state'
+        if ($dormant) {
+            Assert-That ([string] $service.powerState -eq 'Stopped') "the cluster is dormant, and Azure's facts say $($service.powerState)"
+            return "the cluster sleeps and Azure's facts say so ($($service.availability.state), $($service.powerState), $([int] $age.TotalMinutes) min old)"
+        }
+        $url = "https://$slug-cluster.$domain/cluster.json"
+        $origin = 'https://capability-check.example'
+        $answer = Invoke-WebRequest -Uri $url -Headers @{ Origin = $origin } -TimeoutSec 60 -SkipHttpErrorCheck
+        Assert-That ($answer.StatusCode -eq 200) "$url answers HTTP $($answer.StatusCode)"
+        Assert-That (Test-OpenOrigin $answer $origin) "$url does not allow other origins to read it"
+        $text = Get-Text $answer
+        Assert-That ($text -match '"generated"\s*:\s*"([^"]+)"') "$url has no time"
+        $liveAge = [datetimeoffset]::UtcNow - [datetimeoffset]::Parse($Matches[1], [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal)
+        Assert-That ($liveAge.TotalSeconds -lt 120) "$url was written $([int] $liveAge.TotalSeconds) seconds ago: the collector has stopped"
+        $live = $text | ConvertFrom-Json -AsHashtable
+        $nodes = @($live['nodes'] | Where-Object { $_ })
+        Assert-That ($nodes.Count -ge [int] $system.cluster.nodeCount) "$url lists $($nodes.Count) node(s), system.json has $($system.cluster.nodeCount)"
+        Assert-That (@($nodes | Where-Object { $null -eq $_.cpu['usage'] -or $null -eq $_.memory['usage'] }).Count -eq 0) "$url has a node without CPU or memory use: the metrics API does not answer"
+        $spaces = @($live['namespaces'] | Where-Object { $_ })
+        foreach ($e in $environments) {
+            $space = @($spaces | Where-Object { [string] $_['name'] -eq "$slug-$e" }) | Select-Object -First 1
+            Assert-That ($space -and @($space['pods'] | Where-Object { $_ }).Count -gt 0) "$url lists no pod of namespace $slug-$e"
+        }
+        $pods = @($spaces | ForEach-Object { $_['pods'] } | Where-Object { $_ })
+        "live from the cluster ($($nodes.Count) node(s), $($pods.Count) pod(s) in $($spaces.Count) namespaces, $([int] $liveAge.TotalSeconds) s old) and from Azure ($($service.availability.state), $($service.powerState), $([int] $age.TotalMinutes) min old)"
     }
 }
 
