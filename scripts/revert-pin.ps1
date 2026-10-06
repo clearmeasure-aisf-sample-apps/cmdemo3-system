@@ -12,8 +12,10 @@
     rolls it out; when the rollout does not become healthy (or a step before it fails), this step:
       1. Logs the reason Kubernetes gives for the new pods (image pull, crash loop) and the last lines of a crashed
          container, so the failed deployment says why.
-      2. Commits the tag the file held before this deployment's pin (the file at the commit before its latest one;
-         the placeholder when there is none) back to it, so Git again names what runs. Argo CD rolls back to it; the
+      2. Commits the tag the file held before this deployment's pin back to it, so Git again names what runs. That tag
+         comes from main's history, walked commit by commit from the branch's head to the first commit where the file
+         pins another tag (GitHub's list of the commits that touched a file lags minutes behind, and once named the
+         placeholder that way); without one, the release that ran before; the placeholder only on a first deployment. Argo CD rolls back to it; the
          old pods kept serving meanwhile (maxUnavailable 0). The pin is the image's tag, the package version of step
          "Update deployable", which is not always the release number.
       3. Waits until the Deployment runs that tag with every replica available.
@@ -82,7 +84,8 @@ $headers = @{
 }
 function Get-PinnedTag {
     param([string] $Text)
-    [regex]::Match($Text, '(?m)^(\s*newTag:\s*)"?([^"\s]+)"?\s*$')
+    # [ \t]* at the end, not \s*: \s also takes the line's newline, and the file would lose its last one.
+    [regex]::Match($Text, '(?m)^([ \t]*newTag:[ \t]*)"?([^"\s]+)"?[ \t]*$')
 }
 if ($ran -eq $release) {
     Write-Highlight "Release $release ran in $environmentName before this deployment: Git pinned it already, nothing to revert."
@@ -97,14 +100,36 @@ for ($attempt = 1; $attempt -le 4; $attempt++) {
         Write-Highlight "$path does not pin $deployable $tag$(if ($pinned.Success) { " (it pins $($pinned.Groups[2].Value))" }): nothing to revert."
         break
     }
-    # The tag before this deployment's pin: the file at the commit before the latest one that changed it.
-    $commits = @(Invoke-RestMethod -Uri "https://api.github.com/repos/$repository/commits?path=$path&sha=main&per_page=2" -Headers $headers)
-    $previous = '0.0.0-placeholder'
-    if ($commits.Count -ge 2) {
-        $before = Invoke-RestMethod -Uri "${uri}?ref=$($commits[1].sha)" -Headers $headers
-        $earlier = Get-PinnedTag -Text ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(($before.content -replace '\s', ''))))
-        if ($earlier.Success) { $previous = $earlier.Groups[2].Value }
+    # The tag before this deployment's pin: walk main's first parents from $file's commit until the file pins another
+    # tag. Commits and their contents are immutable, so the walk does not lag the way listings do.
+    $previous = ''
+    $source = ''
+    $sha = (Invoke-RestMethod -Uri "https://api.github.com/repos/$repository/commits/main" -Headers $headers).sha
+    for ($step = 0; $step -lt 50 -and $sha; $step++) {
+        $commit = Invoke-RestMethod -Uri "https://api.github.com/repos/$repository/commits/$sha" -Headers $headers
+        $parent = @($commit.parents)[0]
+        if (-not $parent) { break }
+        try {
+            $before = Invoke-RestMethod -Uri "${uri}?ref=$($parent.sha)" -Headers $headers
+            $earlier = Get-PinnedTag -Text ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(($before.content -replace '\s', ''))))
+        }
+        catch {
+            # The file did not exist yet: this deployment's pin is the first.
+            if ($_.Exception.Response -and [int] $_.Exception.Response.StatusCode -eq 404) { $previous = '0.0.0-placeholder'; $source = 'the file did not exist before'; break }
+            throw
+        }
+        if ($earlier.Success -and $earlier.Groups[2].Value -ne $tag) {
+            $previous = $earlier.Groups[2].Value
+            $source = "the file at commit $($parent.sha.Substring(0, 10)), before $($sha.Substring(0, 10))"
+            break
+        }
+        $sha = $parent.sha
     }
+    # A placeholder after a release ran cannot be what ran: then, and when the walk found nothing, the release that
+    # ran is the tag (a release's image tag is its number unless a release chose another one).
+    if ($ran -and (-not $previous -or $previous -eq '0.0.0-placeholder')) { $previous = $ran; $source = "the release that ran before ($ran)" }
+    if (-not $previous) { $previous = '0.0.0-placeholder'; $source = 'no release ran before' }
+    Write-Host "The tag before this deployment's pin: $previous, from $source."
     $content = $text.Substring(0, $pinned.Index) + "$($pinned.Groups[1].Value)`"$previous`"" + $text.Substring($pinned.Index + $pinned.Length)
     $body = @{
         message = "Revert pin of $deployable $release in $environmentName ($deployment failed)"
