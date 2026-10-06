@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   env-checks:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6.0.1
         with:
@@ -86,7 +86,7 @@ jobs:
   # only for branches of this repository: a pull request from a fork gets no credential (CAP-012).
   preview:
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: azure-read
     continue-on-error: true
     permissions:

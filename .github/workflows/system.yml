@@ -44,7 +44,7 @@ env:
 
 jobs:
   octopus-apply:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: octopus
     steps:
       - uses: actions/checkout@v6.0.1
@@ -91,7 +91,7 @@ jobs:
 
   cluster-apply:
     needs: octopus-apply
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: octopus
     outputs:
       dormant: ${{ steps.apply.outputs.dormant }}
@@ -119,7 +119,7 @@ jobs:
     needs: cluster-apply
     # A dormant cluster runs nothing: a release would fail in the first environment.
     if: needs.cluster-apply.outputs.dormant != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: octopus
     steps:
       - uses: actions/checkout@v6.0.1
