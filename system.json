@@ -131,7 +131,10 @@
       "name": "tdd",
       "tier": "nonprod",
       "acceptanceTests": true,
-      "appCpu": "0.5"
+      "appCpu": "0.5",
+      "capabilities": [
+        "telemetry"
+      ]
     },
     {
       "name": "uat",
