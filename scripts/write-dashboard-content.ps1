@@ -579,8 +579,9 @@ if ($missing.Count -gt 0) {
     $aptOutput = @(apt-get update -qq 2>&1) + @(apt-get install -y -qq --no-install-recommends @missing 2>&1)
     $aptCode = $LASTEXITCODE
     $PSNativeCommandUseErrorActionPreference = $true
-    $aptOutput | Where-Object { "$_".Trim() } | ForEach-Object { Write-Host "  apt: $_" }
     if ($aptCode -ne 0) {
+        # The package manager's lines only when it failed: some two hundred of them otherwise, in every deployment's log.
+        $aptOutput | Where-Object { "$_".Trim() } | ForEach-Object { Write-Host "  apt: $_" }
         Fail-Step "Java needs $($missing -join ', ') to render the runtime diagrams with PlantUML, and installing them failed (exit code $aptCode); its output is above."
     }
     Write-Host ('Installed for PlantUML in {0:0.0} s: {1} (the worker container lacked them).' -f $clock.Elapsed.TotalSeconds, ($missing -join ', '))
@@ -650,7 +651,10 @@ while ($true) {
     try {
         $answer = Invoke-WebRequest -Uri "$url/topology.json" -TimeoutSec 20 -SkipHttpErrorCheck
         $text = if ($answer.Content -is [byte[]]) { [Text.Encoding]::UTF8.GetString($answer.Content) } else { [string] $answer.Content }
-        $seen = if ($answer.StatusCode -eq 200) { try { [string] ($text | ConvertFrom-Json -AsHashtable)['generated'] } catch { 'no JSON' } } else { "HTTP $($answer.StatusCode)" }
+        # Read as text: ConvertFrom-Json would turn the time into a date, which never equals the text written (lesson 57).
+        $seen = if ($answer.StatusCode -ne 200) { "HTTP $($answer.StatusCode)" }
+        elseif ($text -match '"generated"\s*:\s*"([^"]+)"') { $Matches[1] }
+        else { 'no "generated" in the answer' }
     }
     catch { $seen = $_.Exception.Message }
     if ($seen -eq [string] $topology.generated) { break }

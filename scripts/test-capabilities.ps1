@@ -171,6 +171,26 @@ function Get-InsightsCount([string] $Environment, [string] $Query) {
     $body = @{ query = $Query; timespan = 'P30D' } | ConvertTo-Json -Compress
     [int] (az rest --method post --url "https://management.azure.com$component/query?api-version=2018-04-20" --body $body --query 'tables[0].rows[0][0]' --output tsv)
 }
+function Get-TelemetryState {
+    # Capability "telemetry" reaches an environment with its system release: the Deployment in Git then reads Secret
+    # "telemetry" under the app's own name. On: the environments where Git says so. Waiting: the ones the newest
+    # system release has not reached yet; that is promotion's matter (the fleet reports a release that stays behind),
+    # not a capability that fails. An environment that runs the newest release without it is a failure.
+    $role = "$slug-$deployable"
+    $newest = [string] @((Invoke-Octopus "/api/$space/projects/$((Get-Project $systemProject).Id)/releases?take=1").Items)[0].Version
+    $state = @{ On = @(); Waiting = @() }
+    foreach ($e in $telemetryEnvironments) {
+        $manifest = Get-RepoFile $systemRepo "gitops/environments/$e/system/apps/$deployable/deployment.yaml"
+        if ($manifest -match 'APPLICATIONINSIGHTS_CONNECTION_STRING[\s\S]{0,160}name:\s*"?telemetry"?\s' -and $manifest -match "OTEL_SERVICE_NAME[\s\S]{0,60}value:\s*`"?$([regex]::Escape($role))`"?\s") {
+            $state.On += $e
+            continue
+        }
+        $deployment = Find-LastDeployment $systemProject $e
+        Assert-That (-not $deployment -or $deployment.Version -ne $newest) "the Deployment of $deployable in $e does not read Secret telemetry under the name $role, although system release $newest runs there"
+        $state.Waiting += $e
+    }
+    $state
+}
 function Get-Pin([string] $Environment) {
     # What Git says the environment runs of the first deployable: the image and the tag that step "Update deployable"
     # (Update Argo CD Application Image Tags) commits, and Argo CD applies.
@@ -455,22 +475,24 @@ $checks = [ordered] @{
         # (OTEL_SERVICE_NAME, <slug>-<deployable>) arrived in the environment's Application Insights in 30 days.
         if ($telemetryEnvironments.Count -eq 0) { Skip-Check 'no environment has capability telemetry yet' }
         $role = "$slug-$deployable"
-        foreach ($e in $telemetryEnvironments) {
-            $manifest = Get-RepoFile $systemRepo "gitops/environments/$e/system/apps/$deployable/deployment.yaml"
-            Assert-That ($manifest -match 'APPLICATIONINSIGHTS_CONNECTION_STRING[\s\S]{0,160}name:\s*"?telemetry"?\s' -and $manifest -match "OTEL_SERVICE_NAME[\s\S]{0,60}value:\s*`"?$([regex]::Escape($role))`"?\s") "the Deployment of $deployable in $e does not read Secret telemetry under the name ${role}: deploy the system release there"
+        $telemetry = Get-TelemetryState
+        if ($telemetry.On.Count -eq 0) { Skip-Check "telemetry awaits the system release in $($telemetry.Waiting -join ', ')" }
+        foreach ($e in $telemetry.On) {
             Assert-That ((Get-InsightsCount $e "requests | where cloud_RoleName == '$role' | summarize count()") -gt 0) "no requests of $role in appi-$slug-$e in 30 days"
         }
-        "requests of $role arriving in Application Insights in $($telemetryEnvironments -join ', ')"
+        "requests of $role arriving in Application Insights in $($telemetry.On -join ', ')$(if ($telemetry.Waiting.Count -gt 0) { "; $($telemetry.Waiting -join ', ') get it with the system release" })"
     }
     'CAP-071' = { $noisy = @(Get-NoisyDeployment); Assert-That ($noisy.Count -eq 0) "warnings in: $($noisy -join '; ')"; 'the logs of every current deployment are clean' }
     'CAP-074' = {
         # Metrics land where telemetry does: metrics of the app under its own name arrived in 30 days.
         if ($telemetryEnvironments.Count -eq 0) { Skip-Check 'no environment has capability telemetry yet' }
         $role = "$slug-$deployable"
-        foreach ($e in $telemetryEnvironments) {
+        $telemetry = Get-TelemetryState
+        if ($telemetry.On.Count -eq 0) { Skip-Check "telemetry awaits the system release in $($telemetry.Waiting -join ', ')" }
+        foreach ($e in $telemetry.On) {
             Assert-That ((Get-InsightsCount $e "customMetrics | where cloud_RoleName == '$role' | summarize count()") -gt 0) "no metrics of $role in appi-$slug-$e in 30 days"
         }
-        "metrics of $role arriving in Application Insights in $($telemetryEnvironments -join ', ')"
+        "metrics of $role arriving in Application Insights in $($telemetry.On -join ', ')$(if ($telemetry.Waiting.Count -gt 0) { "; $($telemetry.Waiting -join ', ') get it with the system release" })"
     }
     'CAP-075' = {
         # One page shows every node: the dashboard (the deployable with hosting "staticsite") serves, in every
