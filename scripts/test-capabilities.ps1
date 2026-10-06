@@ -60,7 +60,20 @@ function Write-Pass { param([string] $Message) Write-Host "PASS $Message" }
 function Write-Fail { param([string] $Message) Write-Host "FAIL $Message" }
 function Invoke-Octopus([string] $Path) {
     $headers = if ($env:OCTOPUS_API_KEY) { @{ 'X-Octopus-ApiKey' = $env:OCTOPUS_API_KEY } } else { @{ Authorization = "Bearer $env:OCTOPUS_ACCESS_TOKEN" } }
-    Invoke-RestMethod -Uri "$($system.octopus.url)$Path" -Headers $headers
+    # Octopus limits the requests of a minute, and the checks ask a lot: a 429 is a known transient (principle 004),
+    # retried after the wait it names; any other answer fails at once.
+    for ($attempt = 1; ; $attempt++) {
+        try {
+            return Invoke-RestMethod -Uri "$($system.octopus.url)$Path" -Headers $headers
+        }
+        catch {
+            $response = $_.Exception.PSObject.Properties['Response'] ? $_.Exception.Response : $null
+            if (-not $response -or [int] $response.StatusCode -ne 429 -or $attempt -ge 6) { throw }
+            $after = $response.Headers.RetryAfter
+            $wait = if ($after -and $after.Delta) { [Math]::Max(1, [int] $after.Delta.TotalSeconds) } else { 10 * $attempt }
+            Start-Sleep -Seconds ([Math]::Min($wait, 60))
+        }
+    }
 }
 function Get-RepoFile([string] $Repo, [string] $Path) {
     $content = gh api "repos/$Repo/contents/$Path" --jq .content
@@ -163,8 +176,14 @@ function Get-RoleName([string] $Group, [string] $PrincipalId) {
     }
 }
 function Get-RecentRun([string] $Runbook, [int] $Days) {
-    $runs = @((Invoke-Octopus "/api/$space/tasks?name=RunbookRun&take=100").Items |
-            Where-Object { $_.Description -like "*$Runbook*" -and $_.State -eq 'Success' -and [datetimeoffset] $_.CompletedTime -gt [datetimeoffset]::UtcNow.AddDays(-$Days) })
+    # The runbook's own successful runs, newest first. Asked by runbook: the hourly "Health report" alone fills the
+    # first page of all runbook runs within a day and a half, and a monthly run would drop out of it.
+    # Into a variable first: a JSON array answer goes down a pipeline as one object, and nothing would match.
+    $runbooks = Invoke-Octopus "/api/$space/runbooks/all"
+    $ids = @($runbooks | Where-Object { $_.Name -eq $Runbook } | ForEach-Object { [string] $_.Id })
+    $all = @(foreach ($id in $ids) { (Invoke-Octopus "/api/$space/tasks?name=RunbookRun&runbook=$id&states=Success&take=100").Items })
+    $runs = @($all | Where-Object { $_ -and [datetimeoffset] $_.CompletedTime -gt [datetimeoffset]::UtcNow.AddDays(-$Days) } |
+            Sort-Object { [datetimeoffset] $_.CompletedTime } -Descending)
     if ($runs.Count -eq 0 -and (Get-SystemAge) -lt $Days) { Skip-Check "the system is younger than $Days days: $Runbook is not due yet" }
     $runs
 }
