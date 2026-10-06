@@ -36,6 +36,10 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
+
+# The Azure CLI checks once a day whether a newer Bicep exists and says so as a warning on the next command that
+# reads a template: a warning in the log that is about nothing in it. The version in use is the installed one.
+$env:AZURE_BICEP_CHECK_VERSION = 'false'
 $ProgressPreference = 'SilentlyContinue'
 
 $argoChartVersion = '10.9.6'
