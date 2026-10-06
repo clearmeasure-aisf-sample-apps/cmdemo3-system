@@ -124,6 +124,13 @@
       "acceptanceTestsPackage": "ChurchBulletin.AcceptanceTests",
       "acceptanceTestsAssembly": "ClearMeasure.Bootcamp.AcceptanceTests.dll",
       "dataLoaderAssembly": "ClearMeasure.Bootcamp.IntegrationTests.dll"
+    },
+    {
+      "name": "dashboard",
+      "repository": "cmdemo3-dashboard",
+      "hosting": "staticsite",
+      "port": 8080,
+      "healthPath": "/"
     }
   ],
   "environments": [

@@ -86,6 +86,21 @@ spec:
           selector:
             matchLabels:
               kubernetes.io/metadata.name: cmdemo3-tdd
+    - name: https-tdd-dashboard
+      protocol: HTTPS
+      port: 443
+      hostname: cmdemo3-tdd-dashboard.20-225-155-175.sslip.io
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: tls-tdd-dashboard
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: cmdemo3-tdd
     - name: https-uat
       protocol: HTTPS
       port: 443
@@ -101,6 +116,21 @@ spec:
           selector:
             matchLabels:
               kubernetes.io/metadata.name: cmdemo3-uat
+    - name: https-uat-dashboard
+      protocol: HTTPS
+      port: 443
+      hostname: cmdemo3-uat-dashboard.20-225-155-175.sslip.io
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: tls-uat-dashboard
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: cmdemo3-uat
     - name: https-prod
       protocol: HTTPS
       port: 443
@@ -110,6 +140,21 @@ spec:
         certificateRefs:
           - kind: Secret
             name: tls-prod
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: cmdemo3-prod
+    - name: https-prod-dashboard
+      protocol: HTTPS
+      port: 443
+      hostname: cmdemo3-prod-dashboard.20-225-155-175.sslip.io
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: tls-prod-dashboard
       allowedRoutes:
         namespaces:
           from: Selector

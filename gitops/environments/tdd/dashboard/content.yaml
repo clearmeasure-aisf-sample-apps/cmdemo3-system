@@ -1,0 +1,10 @@
+# What the site of dashboard shows in tdd: step "Write dashboard content" of the Octopus project
+# cmdemo3-dashboard replaces this file with every deployment. Do not edit it by hand.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-content
+data:
+  topology.json: |
+    { "environments": [] }
