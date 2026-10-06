@@ -78,18 +78,33 @@ Test-Rule 'deployables present' ($deployableNames.Count -gt 0)
 foreach ($name in $deployableNames) {
     Test-Rule "deployable $name name" ($name -cmatch '^[a-z](?:[a-z0-9]|-(?=[a-z0-9])){1,9}$') 'lowercase letters, digits and inner hyphens, 2 to 10'
     Test-Rule "deployable $name is not 'system'" ($name -cne 'system') 'the Octopus project <slug>-system is the environments project'
+}
+# What runs in the cluster has its manifests in gitops/; a dashboard outside it (hosting "staticwebapp") has none.
+$siteNames = @($system.deployables | Where-Object { [string] $_['hosting'] -eq 'staticwebapp' } | ForEach-Object { [string] $_.name })
+$clusterNames = @($deployableNames | Where-Object { $siteNames -notcontains $_ })
+foreach ($name in $clusterNames) {
     Test-Rule "deployable $name templates" (Test-Path -LiteralPath (Join-Path $Root 'gitops' 'templates' 'environment' 'apps' $name 'deployment.yaml')) 'run scripts/write-gitops.ps1'
 }
-# A deployable is an app, or with hosting "staticsite" a static site (the health dashboard). The first one is the app
-# that owns the database and the environment's own host name.
+foreach ($name in $siteNames) {
+    Test-Rule "deployable $name is not 'cluster'" ($name -cne 'cluster') 'the ingress listener https-cluster is the cluster''s status file'
+}
+# A deployable is an app, or the health dashboard: with hosting "staticsite" a static site in the cluster, with
+# "staticwebapp" the same site outside it, on Azure Static Web Apps. The first one is the app that owns the database
+# and the environment's own host name.
 $staticNames = @($system.deployables | Where-Object { [string] $_['hosting'] -eq 'staticsite' } | ForEach-Object { [string] $_.name })
 Test-Rule 'the first deployable is an app' (@($system.deployables).Count -gt 0 -and -not $system.deployables[0].ContainsKey('hosting')) 'a static site comes after the app whose nodes it shows'
 foreach ($deployable in $system.deployables) {
     $name = [string] $deployable.name
     if ($deployable.ContainsKey('hosting')) {
-        Test-Rule "deployable $name hosting" ([string] $deployable.hosting -ceq 'staticsite') 'left out for an app, or "staticsite"'
+        Test-Rule "deployable $name hosting" (@('staticsite', 'staticwebapp') -ccontains [string] $deployable.hosting) 'left out for an app, or "staticsite" or "staticwebapp"'
     }
-    Test-Rule "deployable $name port" ($deployable['port'] -is [long] -and $deployable.port -ge 1 -and $deployable.port -le 65535) 'the port its container listens on'
+    if ($siteNames -contains $name) {
+        Test-Rule "deployable $name port" (-not $deployable.ContainsKey('port')) 'a site outside the cluster has no container: leave port out'
+        Test-Rule "deployable $name healthPath is /" ([string] $deployable['healthPath'] -ceq '/') 'a Static Web App answers at /'
+    }
+    else {
+        Test-Rule "deployable $name port" ($deployable['port'] -is [long] -and $deployable.port -ge 1 -and $deployable.port -le 65535) 'the port its container listens on'
+    }
     Test-Rule "deployable $name healthPath" ([string] $deployable['healthPath'] -cmatch '^/\S*$') 'a path that starts with /'
     # What the dashboard reads from an app (its README): each only once the app that serves it runs everywhere.
     foreach ($key in 'telemetryPath', 'buildPath') {
@@ -110,6 +125,7 @@ foreach ($environment in $system.environments) {
     Test-Rule "environment $name name" ($name -cmatch '^[a-z][a-z0-9]{1,7}$') 'lowercase letters and digits, 2 to 8'
     Test-Rule "environment $name tier" (@('nonprod', 'prod') -ccontains [string] $environment.tier)
     Test-Rule "environment $name is not 'argocd'" ($name -cne 'argocd') 'the ingress listener https-argocd is the Argo CD web UI'
+    Test-Rule "environment $name is not 'cluster'" ($name -cne 'cluster') 'the ingress listener https-cluster is the cluster''s status file'
     if ($environment.ContainsKey('appCpu')) {
         Test-Rule "environment $name appCpu" (@('0.5', '1', '1.5', '2') -contains [string] $environment.appCpu) '0.5, 1, 1.5 or 2'
     }
@@ -122,9 +138,16 @@ foreach ($environment in $system.environments) {
     }
     Test-Rule "environment $name Applications" (Test-Path -LiteralPath (Join-Path $Root 'gitops' 'argocd' 'apps' "environment-$name.yaml")) 'run scripts/write-gitops.ps1'
     Test-Rule "environment $name folder" (Test-Path -LiteralPath (Join-Path $Root 'gitops' 'environments' $name 'system' 'kustomization.yaml')) 'run scripts/write-gitops.ps1'
-    foreach ($deployableName in $deployableNames) {
+    foreach ($deployableName in $clusterNames) {
         Test-Rule "environment $name pin of $deployableName" (Test-Path -LiteralPath (Join-Path $Root 'gitops' 'environments' $name $deployableName 'kustomization.yaml')) 'run scripts/write-gitops.ps1'
     }
+}
+
+if ($system.system.ContainsKey('staticLocation')) {
+    Test-Rule 'system.staticLocation' (@('westus2', 'centralus', 'eastus2', 'westeurope', 'eastasia') -ccontains [string] $system.system.staticLocation) 'a region that has the Free plan of Static Web Apps: westus2, centralus, eastus2, westeurope or eastasia'
+}
+if ($siteNames.Count -gt 0 -or $staticNames.Count -gt 0) {
+    Test-Rule 'the cluster reports its status' ((Get-Content -LiteralPath (Join-Path $Root 'gitops' 'platform' 'kustomization.yaml') -Raw) -match 'cluster-status\.yaml') 'run scripts/write-gitops.ps1'
 }
 
 $environmentsFolder = Join-Path $Root 'gitops' 'environments'

@@ -36,6 +36,12 @@ locals {
   # A deployable with hosting "staticsite" is a static site (the health dashboard): a web server at its own host name,
   # whose per-environment content step "Write dashboard content" commits to Git. Every other one is an app.
   static_deployables = { for name, d in local.deployables : name => d if try(d.hosting, "") == "staticsite" }
+  # A deployable with hosting "staticwebapp" is the same site outside the cluster: an Azure Static Web App per
+  # environment (infra/cluster.bicep), which its project uploads the release's files to as the tier's deploy identity.
+  # It has no Argo CD Application, no pin in a kustomization and nothing to measure or revert in the cluster.
+  site_deployables    = { for name, d in local.deployables : name => d if try(d.hosting, "") == "staticwebapp" }
+  cluster_deployables = { for name, d in local.deployables : name => d if try(d.hosting, "") != "staticwebapp" }
+  tiers               = toset([for e in local.system.environments : e.tier])
   # The first deployable answers at <slug>-<env>.<domain>, every other one at <slug>-<env>-<name>.<domain>.
   host_suffix = { for i, d in local.system.deployables : d.name => i == 0 ? "" : "-${d.name}" }
 
@@ -99,6 +105,23 @@ resource "octopusdeploy_lifecycle" "system" {
 resource "octopusdeploy_project_group" "system" {
   name        = local.slug
   description = "${local.system.system.name}: the environments (${local.slug}-system) and one project per deployable."
+}
+
+# Only with a deployable outside the cluster (hosting "staticwebapp"): one Azure account per tier, restricted to that
+# tier's environments; subjects space/project/environment match the federated credentials of id-<slug>-deploy-<tier>
+# that the seed created. Nothing in the cluster is deployed with it.
+resource "octopusdeploy_azure_openid_connect" "deploy" {
+  for_each = length(local.site_deployables) == 0 ? toset([]) : local.tiers
+
+  name                              = "azure-${local.slug}-${each.key}"
+  description                       = "id-${local.slug}-deploy-${each.key}: uploads the static sites of ${each.key} (hosting staticwebapp)."
+  application_id                    = local.system.azure.identities.deploy[each.key].clientId
+  tenant_id                         = local.system.azure.tenantId
+  subscription_id                   = local.system.azure.subscriptionId
+  audience                          = "api://AzureADTokenExchange"
+  execution_subject_keys            = ["space", "project", "environment"]
+  environments                      = [for name, e in local.environments : octopusdeploy_environment.this[name].id if e.tier == each.key]
+  tenanted_deployment_participation = "Untenanted"
 }
 
 data "octopusdeploy_feeds" "built_in" {

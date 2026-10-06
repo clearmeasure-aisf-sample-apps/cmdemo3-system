@@ -20,7 +20,7 @@ resource "octopusdeploy_project" "deployable" {
 
   name                              = "${local.slug}-${each.key}"
   slug                              = "${local.slug}-${each.key}"
-  description                       = contains(keys(local.static_deployables), each.key) ? "Static site ${each.key} from ${local.system.system.githubOrg}/${each.value.repository}: write its content and the image tag to Git, verify." : "Deployable ${each.key} from ${local.system.system.githubOrg}/${each.value.repository}: migrate, write the image tag to Git, verify."
+  description                       = contains(keys(local.site_deployables), each.key) ? "Static site ${each.key} from ${local.system.system.githubOrg}/${each.value.repository}, outside the cluster on Azure Static Web Apps: write its content, upload it and record its address in Git, verify." : contains(keys(local.static_deployables), each.key) ? "Static site ${each.key} from ${local.system.system.githubOrg}/${each.value.repository}: write its content and the image tag to Git, verify." : "Deployable ${each.key} from ${local.system.system.githubOrg}/${each.value.repository}: migrate, write the image tag to Git, verify."
   project_group_id                  = octopusdeploy_project_group.system.id
   lifecycle_id                      = octopusdeploy_lifecycle.system.id
   tenanted_deployment_participation = "Untenanted"
@@ -248,7 +248,7 @@ resource "octopusdeploy_process_step" "seed_demo_employees" {
 # path of the Argo CD Application annotated with this project and the deployment's environment). The package is a
 # reference to the image in the system's registry, never downloaded.
 resource "octopusdeploy_process_step" "update" {
-  for_each = local.deployables
+  for_each = local.cluster_deployables
 
   process_id     = octopusdeploy_process.deployable[each.key].id
   name           = "Update deployable"
@@ -294,11 +294,58 @@ resource "octopusdeploy_process_step" "content" {
   })
 }
 
+# A site outside the cluster (hosting "staticwebapp", the dashboard on Azure Static Web Apps): the release's zip
+# (package <slug>-<deployable> in the built-in feed, extracted) with the same content written into it, uploaded with
+# the site's deployment token as the tier's deploy identity, and its address and version recorded in Git
+# (gitops/environments/<env>/<name>/site.json). On the hosted pool, so the site can be deployed while the cluster
+# is stopped (scripts/write-dashboard-content.ps1).
+resource "octopusdeploy_process_step" "upload_site" {
+  for_each = local.site_deployables
+
+  process_id     = octopusdeploy_process.deployable[each.key].id
+  name           = "Update deployable"
+  type           = "Octopus.AzurePowerShell"
+  worker_pool_id = local.hosted_worker_pool_id
+  container      = local.container
+
+  packages = {
+    site = {
+      package_id           = "${local.slug}-${each.key}"
+      feed_id              = local.built_in_feed_id
+      acquisition_location = "Server"
+      properties = {
+        Extract       = "True"
+        Purpose       = ""
+        SelectionMode = "immediate"
+      }
+    }
+  }
+
+  execution_properties = merge(local.script_properties, {
+    "Octopus.Action.Azure.AccountId"   = "#{Azure.Account}"
+    "Octopus.Action.Script.ScriptBody" = file("${path.module}/../scripts/write-dashboard-content.ps1")
+  })
+}
+
+resource "octopusdeploy_process_step" "verify_site" {
+  for_each = local.site_deployables
+
+  process_id     = octopusdeploy_process.deployable[each.key].id
+  name           = "Verify deployable"
+  type           = "Octopus.Script"
+  worker_pool_id = local.hosted_worker_pool_id
+  container      = local.container
+
+  execution_properties = merge(local.script_properties, {
+    "Octopus.Action.Script.ScriptBody" = file("${path.module}/../scripts/verify-site.ps1")
+  })
+}
+
 # Runs only when an earlier step failed: names why the new version cannot start and commits the previous tag back
 # (scripts/revert-pin.ps1). It stands before the test steps, so failed acceptance tests fail the deployment, which
 # blocks its promotion, but leave the version that runs pinned.
 resource "octopusdeploy_process_step" "revert_pin" {
-  for_each = local.deployables
+  for_each = local.cluster_deployables
 
   process_id     = octopusdeploy_process.deployable[each.key].id
   name           = "Revert pin"
@@ -315,7 +362,7 @@ resource "octopusdeploy_process_step" "revert_pin" {
 # Started together with "Update deployable": measures the app's availability while Argo CD rolls it out, and fails
 # the deployment on downtime (scripts/measure-availability.ps1, CAP-044).
 resource "octopusdeploy_process_step" "measure" {
-  for_each = local.deployables
+  for_each = local.cluster_deployables
 
   process_id     = octopusdeploy_process.deployable[each.key].id
   name           = "Measure availability"
@@ -330,7 +377,7 @@ resource "octopusdeploy_process_step" "measure" {
 }
 
 resource "octopusdeploy_process_step" "verify" {
-  for_each = local.deployables
+  for_each = local.cluster_deployables
 
   process_id     = octopusdeploy_process.deployable[each.key].id
   name           = "Verify deployable"
@@ -409,7 +456,11 @@ resource "octopusdeploy_process_steps_order" "deployable" {
   for_each = local.deployables
 
   process_id = octopusdeploy_process.deployable[each.key].id
-  steps = concat(
+  steps = contains(keys(local.site_deployables), each.key) ? [
+    octopusdeploy_process_step.sign_off[each.key].id,
+    octopusdeploy_process_step.upload_site[each.key].id,
+    octopusdeploy_process_step.verify_site[each.key].id,
+    ] : concat(
     [octopusdeploy_process_step.sign_off[each.key].id],
     contains(keys(local.migrated_deployables), each.key) ? [octopusdeploy_process_step.restore_point[each.key].id] : [],
     contains(keys(local.migrated_deployables), each.key) ? [octopusdeploy_process_step.migrate[each.key].id] : [],

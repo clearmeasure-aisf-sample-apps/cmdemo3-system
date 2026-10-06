@@ -12,6 +12,9 @@
     app is asked /alive (does the process answer; the health check with its database is the deployments' business)
     and /_version, a static site its start page. Three attempts each. The run fails when one does not answer 200.
     The last line names the health dashboard, when the system has one.
+    A dashboard outside the cluster (System.Sites: hosting "staticwebapp") is asked at the address its deployment
+    recorded in Git (gitops/environments/<env>/<name>/site.json); one that was never deployed here is said so and
+    does not fail the run.
 #>
 [CmdletBinding()]
 param()
@@ -65,8 +68,27 @@ foreach ($deployable in $deployables) {
     # An unhealthy deployable is this run's result, said once by the failure below: its line is information.
     if ($healthy) { Write-Highlight $line } else { Write-Host $line }
 }
+$sites = if ($OctopusParameters['System.Sites']) { @(([string] $OctopusParameters['System.Sites']) | ConvertFrom-Json) } else { @() }
+$repository = [string] $OctopusParameters['System.Repository']
+$asked = $deployables.Count
+foreach ($name in $sites) {
+    $record = "https://raw.githubusercontent.com/$repository/main/gitops/environments/$environmentName/$name/site.json"
+    $url = try { [string] (Invoke-RestMethod -Uri $record -TimeoutSec 30).url } catch { '' }
+    if (-not $url) {
+        Write-Host "Not deployed  $name in ${environmentName}, static site outside the cluster: no address recorded yet ($record)"
+        continue
+    }
+    $asked++
+    $answer = Get-Answer -Uri "$url/"
+    $healthy = $answer.Status -eq 200
+    if (-not $healthy) { $unhealthy++ }
+    $state = if ($healthy) { 'Healthy' } elseif ($answer.Status -eq 0) { 'Unreachable' } else { 'Unhealthy' }
+    $line = "$state  $name in ${environmentName}, static site outside the cluster: $(if ($answer.Status) { "HTTP $($answer.Status) in $($answer.Milliseconds) ms" } else { 'no answer' })  $url"
+    if ($healthy) { Write-Highlight $line } else { Write-Host $line }
+    if ($healthy) { Write-Highlight "Live view that answers without the cluster: $url" }
+}
 if ($dashboard) { Write-Highlight "Live view of every node of every environment: $dashboard" }
 if ($unhealthy -gt 0) {
-    Fail-Step "$unhealthy of $($deployables.Count) deployable(s) of $environmentName are not healthy."
+    Fail-Step "$unhealthy of $asked deployable(s) of $environmentName are not healthy."
 }
-Write-Highlight "All $($deployables.Count) deployable(s) of $environmentName are healthy."
+Write-Highlight "All $asked deployable(s) of $environmentName are healthy."

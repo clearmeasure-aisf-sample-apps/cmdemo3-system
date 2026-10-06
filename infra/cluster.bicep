@@ -5,6 +5,7 @@
 // storage account and identity of the SQL backups (this stack adds that identity's federated credentials).
 // With capability "telemetry" an environment gets its own Log Analytics workspace and Application Insights here; the
 // cluster job hands the connection string to the environment's namespace as a Secret (cluster/apply-cluster.ps1).
+// A deployable with hosting "staticwebapp" gets a Static Web App per environment here (the dashboard outside the cluster).
 targetScope = 'resourceGroup'
 
 var system = loadJsonContent('../system.json')
@@ -141,3 +142,33 @@ resource insights 'Microsoft.Insights/components@2020-02-02' = [
 output clusterName string = aks.name
 output kubernetesVersion string = aks.properties.currentKubernetesVersion
 output oidcIssuer string = aks.properties.oidcIssuerProfile.issuerURL
+
+// Hosting "staticwebapp" (system.json deployables[].hosting): a second home of the health dashboard outside the
+// cluster, one Azure Static Web App on the Free plan per such deployable and environment, so the page still answers
+// while the cluster is stopped or broken. No repository is linked: the deployable's Octopus project uploads the
+// release's files with the site's deployment token, read at deploy time and never stored
+// (scripts/write-dashboard-content.ps1). The Free plan exists in a few regions only (westus2, centralus, eastus2,
+// westeurope, eastasia); the files are served from the platform's edge everywhere (system.staticLocation, centralus
+// unless set). any(): system.json has neither key until a system uses them (BCP053).
+var siteDeployables = filter(system.deployables, d => (any(d).?hosting ?? '') == 'staticwebapp')
+var sitePairs = flatten(map(siteDeployables, d => map(system.environments, e => { deployable: d.name, environment: e.name, tier: e.tier })))
+
+resource sites 'Microsoft.Web/staticSites@2024-04-01' = [
+  for pair in sitePairs: {
+    name: 'swa-${slug}-${pair.environment}-${pair.deployable}'
+    location: any(system.system).?staticLocation ?? 'centralus'
+    tags: {
+      system: slug
+      purpose: 'demo'
+      environment: pair.environment
+      tier: pair.tier
+      deployable: pair.deployable
+    }
+    sku: {
+      name: 'Free'
+      tier: 'Free'
+    }
+    properties: {}
+  }
+]
+

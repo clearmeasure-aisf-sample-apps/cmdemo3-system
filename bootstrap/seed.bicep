@@ -219,6 +219,7 @@ module cluster 'modules/seed-cluster.bicep' = if (hasCluster) {
     feedSubject: 'space:${octopusSpaceSlug}:feed:acr-${slug}'
     planPrincipalId: nonprod.outputs.plan.principalId
     whatIfRoleName: whatIfRole.name
+    deployPrincipalIds: [nonprod.outputs.deploy.principalId, prod.outputs.deploy.principalId]
   }
 }
 

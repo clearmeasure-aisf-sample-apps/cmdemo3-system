@@ -12,7 +12,10 @@ locals {
     for project, id in local.project_ids : [
       { key = "${project}-slug", project = id, name = "System.Slug", value = local.slug, environment = null },
       { key = "${project}-repository", project = id, name = "System.Repository", value = local.repository, environment = null },
-      { key = "${project}-deployables", project = id, name = "System.Deployables", value = jsonencode([for d in local.system.deployables : { name = d.name, healthPath = d.healthPath, hostSuffix = local.host_suffix[d.name], hosting = try(d.hosting, "") }]), environment = null },
+      { key = "${project}-deployables", project = id, name = "System.Deployables", value = jsonencode([for d in local.system.deployables : { name = d.name, healthPath = d.healthPath, hostSuffix = local.host_suffix[d.name], hosting = try(d.hosting, "") } if try(d.hosting, "") != "staticwebapp"]), environment = null },
+      # The dashboards outside the cluster (hosting "staticwebapp"): the health report asks them at the address their
+      # deployment recorded in Git.
+      { key = "${project}-sites", project = id, name = "System.Sites", value = jsonencode([for name, d in local.site_deployables : name]), environment = null },
       { key = "${project}-registry", project = id, name = "Azure.RegistryServer", value = local.system.azure.registry.loginServer, environment = null },
       { key = "${project}-domain", project = id, name = "Cluster.Domain", value = local.system.cluster.domain, environment = null },
       { key = "${project}-database", project = id, name = "Database.Name", value = local.slug, environment = null },
@@ -101,6 +104,21 @@ resource "octopusdeploy_variable" "concurrency_tag" {
   description = "Serializes deployments per environment across projects."
 }
 
+# Azure.Account: the tier's OIDC account, scoped to each environment of the tier, for the projects of the sites outside
+# the cluster (hosting "staticwebapp").
+resource "octopusdeploy_variable" "azure_account" {
+  for_each = { for pair in setproduct(keys(local.site_deployables), keys(local.environments)) : "${pair[0]}-${pair[1]}" => { project = pair[0], environment = pair[1] } }
+
+  owner_id = octopusdeploy_project.deployable[each.value.project].id
+  name     = "Azure.Account"
+  type     = "AzureAccount"
+  value    = octopusdeploy_azure_openid_connect.deploy[local.environments[each.value.environment].tier].id
+
+  scope {
+    environments = [octopusdeploy_environment.this[each.value.environment].id]
+  }
+}
+
 # The deployable projects' step "Revert pin" commits the previous image tag back through the GitHub API with this
 # token (repository secret OCTOPUS_GITHUB_TOKEN, the same token as the Git credential of the Argo CD steps).
 resource "octopusdeploy_variable" "github_token" {
@@ -111,5 +129,5 @@ resource "octopusdeploy_variable" "github_token" {
   type            = "Sensitive"
   is_sensitive    = true
   sensitive_value = var.github_token
-  description     = "Step Revert pin commits the previous image tag with it. From repository secret OCTOPUS_GITHUB_TOKEN."
+  description     = "Step Revert pin commits the previous image tag with it, and a dashboard's deployment its content or its site's address. From repository secret OCTOPUS_GITHUB_TOKEN."
 }
