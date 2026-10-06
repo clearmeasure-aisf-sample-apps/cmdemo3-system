@@ -123,7 +123,13 @@
       "databaseAssembly": "ClearMeasure.Bootcamp.Database.dll",
       "acceptanceTestsPackage": "ChurchBulletin.AcceptanceTests",
       "acceptanceTestsAssembly": "ClearMeasure.Bootcamp.AcceptanceTests.dll",
-      "dataLoaderAssembly": "ClearMeasure.Bootcamp.IntegrationTests.dll"
+      "dataLoaderAssembly": "ClearMeasure.Bootcamp.IntegrationTests.dll",
+      "telemetryPath": "/_telemetry",
+      "buildPath": "/_build",
+      "trafficPaths": [
+        "/",
+        "/api/work-orders/status-counts"
+      ]
     },
     {
       "name": "dashboard",
