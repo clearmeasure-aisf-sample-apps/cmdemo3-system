@@ -54,7 +54,7 @@ spec:
             - name: APPLICATIONINSIGHTS_CONNECTION_STRING
               valueFrom:
                 secretKeyRef:
-                  name: "telemetry-off"
+                  name: "telemetry"
                   key: connection-string
                   optional: true
           startupProbe:
