@@ -226,6 +226,8 @@ function ConvertTo-ClusterTopology {
             repository  = if ($repository) { "https://github.com/$repository" } else { $null }
             # The delivery facts: workflow delivery of the system repository publishes them to its branch "status".
             deliveryUrl = if ($repository) { "https://raw.githubusercontent.com/$repository/status/delivery.json" } else { $null }
+            # What each environment cost: the same workflow publishes it next to the delivery facts.
+            costUrl     = if ($repository) { "https://raw.githubusercontent.com/$repository/status/cost.json" } else { $null }
         }
         generated    = $Generated.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ', [Globalization.CultureInfo]::InvariantCulture)
         # The cluster view: the live status the collector in the cluster serves (nodes, pods, their CPU and memory),
