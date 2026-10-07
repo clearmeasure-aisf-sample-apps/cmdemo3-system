@@ -12,9 +12,10 @@ data:
         "slug": "cmdemo3",
         "name": "Clear Measure work orders demo 3 (AKS and Argo CD)",
         "repository": "https://github.com/clearmeasure-aisf-sample-apps/cmdemo3-system",
-        "deliveryUrl": "https://raw.githubusercontent.com/clearmeasure-aisf-sample-apps/cmdemo3-system/status/delivery.json"
+        "deliveryUrl": "https://raw.githubusercontent.com/clearmeasure-aisf-sample-apps/cmdemo3-system/status/delivery.json",
+        "costUrl": "https://raw.githubusercontent.com/clearmeasure-aisf-sample-apps/cmdemo3-system/status/cost.json"
       },
-      "generated": "2026-10-07T02:26:48Z",
+      "generated": "2026-10-07T03:52:15Z",
       "cluster": {
         "name": "aks-cmdemo3",
         "statusUrl": "https://cmdemo3-cluster.20-225-155-175.sslip.io/cluster.json",
@@ -296,7 +297,7 @@ data:
     }
   runtime-index.json: |
     {
-      "generated": "2026-10-07T02:26:48Z",
+      "generated": "2026-10-07T03:52:15Z",
       "plantuml": "1.2026.8",
       "environments": [
         {
@@ -402,7 +403,7 @@ data:
           "kind": "dashboard"
         }
       ],
-      "generated": "2026-10-07T02:26:48Z",
+      "generated": "2026-10-07T03:52:15Z",
       "plantuml": "1.2026.8"
     }
   runtime-prod.puml: |
@@ -532,7 +533,7 @@ data:
           "kind": "dashboard"
         }
       ],
-      "generated": "2026-10-07T02:26:48Z",
+      "generated": "2026-10-07T03:52:15Z",
       "plantuml": "1.2026.8"
     }
   runtime-tdd.puml: |
@@ -662,7 +663,7 @@ data:
           "kind": "dashboard"
         }
       ],
-      "generated": "2026-10-07T02:26:48Z",
+      "generated": "2026-10-07T03:52:15Z",
       "plantuml": "1.2026.8"
     }
   runtime-uat.puml: |
