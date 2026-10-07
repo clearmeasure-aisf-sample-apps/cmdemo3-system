@@ -178,7 +178,8 @@
     "nodeCount": 1,
     "ingressIp": "20.225.155.175",
     "ingressPublicIpName": "pip-cmdemo3-ingress",
-    "domain": "20-225-155-175.sslip.io"
+    "domain": "20-225-155-175.sslip.io",
+    "dormant": true
   },
   "sql": {
     "edition": "Express"
