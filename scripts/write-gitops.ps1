@@ -549,7 +549,8 @@ foreach ($deployable in $deployables) {
     $suffix = Get-HostSuffix $deployable
     $port = [int] $deployable.port
     $static = Test-StaticSite $deployable
-    $cors = $hasDashboard -and -not $static
+    # Every deployable in the cluster, the dashboard too: another dashboard of the system checks it from the browser.
+    $cors = $hasDashboard
     Set-File "$folder/kustomization.yaml" @"
 $generated
 ---
@@ -771,8 +772,9 @@ spec:
     if ($cors) {
         Set-File "$folder/cors.yaml" @"
 $generated
-# Any origin may read this app's answers (GET only, no credentials): the health dashboard is a page in the visitor's
-# browser, and each environment's dashboard asks the public health and version endpoints of every environment.
+# Any origin may read this deployable's answers (GET only, no credentials): the health dashboard is a page in the
+# visitor's browser, and each dashboard asks the public health and version endpoints of every environment's apps and of
+# the system's other dashboards.
 ---
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: SecurityPolicy

@@ -645,7 +645,7 @@ $checks = [ordered] @{
         # cluster itself (the collector of gitops/platform/cluster-status.yaml): a file no older than two minutes, any
         # origin may read it, every node of system.json with its CPU and memory use, and pods in every environment's
         # namespace. From outside it (workflow cluster-status, branch "cluster-status"): Azure's facts about the AKS
-        # service, no older than an hour, with Resource Health's verdict and whether the cluster runs. The check proves
+        # service, no older than two hours, with Resource Health's verdict and whether the cluster runs. The check proves
         # that both report, not that all is healthy; while the cluster sleeps, that Azure's facts say so.
         if ($dashboards.Count -eq 0) { Skip-Check 'no dashboard yet: the cluster reports its status only for one' }
         $branches = @(gh api "repos/$systemRepo/branches" --paginate --jq '.[].name')
@@ -653,7 +653,8 @@ $checks = [ordered] @{
         $facts = Get-RepoFile $systemRepo 'aks.json?ref=cluster-status'
         Assert-That ($facts -match '"generated"\s*:\s*"([^"]+)"') 'aks.json on branch cluster-status has no time'
         $age = [datetimeoffset]::UtcNow - [datetimeoffset]::Parse($Matches[1], [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal)
-        Assert-That ($age.TotalMinutes -lt 60) "Azure's facts about the cluster are $([int] $age.TotalMinutes) minutes old: workflow cluster-status is not running"
+        # GitHub starts the ten-minute schedule every 10 to 45 minutes (cmdemo3, 2026-10-06): two hours is a workflow that stopped.
+        Assert-That ($age.TotalMinutes -lt 120) "Azure's facts about the cluster are $([int] $age.TotalMinutes) minutes old: workflow cluster-status is not running"
         $service = $facts | ConvertFrom-Json -AsHashtable
         Assert-That ($service['availability'] -is [hashtable] -and $service.availability['state'] -and $service['powerState']) 'aks.json has no verdict of Azure Resource Health or no power state'
         if ($dormant) {

@@ -7,7 +7,7 @@
     use of CPU, memory and disk (runtime aks-argocd).
 
 .DESCRIPTION
-    Workflow cluster-status of the system repository runs this every ten minutes as the plan identity, a reader of the
+    Workflow cluster-status of the system repository runs this several times an hour and after every run of workflow system, as the plan identity, a reader of the
     cluster's resource group, and publishes the file as aks.json on branch "cluster-status". The health dashboard reads
     it from the visitor's browser (topology.json cluster.serviceUrl) next to the live status the cluster serves about
     itself: these facts come from outside the cluster, so the page can still say "Azure reports the cluster stopped"
