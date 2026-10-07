@@ -5,7 +5,7 @@
 # the branch no history. The dashboard reads it from the browser at
 # https://raw.githubusercontent.com/<org>/<repository>/cluster-status/aks.json (the repository is public), next to
 # the live status the cluster serves about itself: these facts still arrive when the cluster is stopped or broken.
-# Every ten minutes (GitHub starts scheduled runs late under load, and serves the file from a cache of about five
+# On a ten-minute schedule, which GitHub starts every 10 to 45 minutes in practice (cmdemo3, 2026-10-06), and serves the file from a cache of about five
 # minutes: the page shows how old the facts are), after every run of workflow system, and on demand.
 # Credentials: GitHub OIDC to Azure (environment "capabilities", read-only), and this workflow's own token to push the
 # branch. No stored secret.

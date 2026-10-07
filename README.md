@@ -45,7 +45,7 @@ address and release in `gitops/environments/<env>/<name>/site.json`. It answers 
 While the system has a dashboard, the cluster reports its own status for the page's Cluster view:
 `gitops/platform/cluster-status.yaml` (a read-only collector and a web server for its one file,
 `https://<slug>-cluster.<cluster.domain>/cluster.json`), and workflow `cluster-status` publishes what Azure says about
-the AKS service to branch `cluster-status` every ten minutes.
+the AKS service to branch `cluster-status` several times an hour, and after every run of workflow `system`.
 
 `"capabilities": ["telemetry"]` on an environment gives it a Log Analytics workspace and Application Insights
 (`infra/cluster.bicep`). Job `cluster-apply` hands the connection string to the environment's namespace as Secret

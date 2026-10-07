@@ -94,13 +94,17 @@ function ConvertTo-ClusterTopology {
     # The dashboard's topology from system.json (parsed, as a hashtable). It asks nothing: the same input gives the
     # same topology. Every app (a deployable that is no static site) has one node per environment: its Deployment, at
     # the public address the Gateway gives it. The pin of an app is the newTag of its kustomization on main (pinUrl).
+    # A dashboard is a node too, where its address is known (-DashboardUrl, "<environment>/<name>"): each dashboard
+    # checks the others (its own site says "This page"), at / and /version.json, and takes no generated traffic.
     param(
         [Parameter(Mandatory)] [hashtable] $System,
-        [datetime] $Generated = [datetime]::UtcNow
+        [datetime] $Generated = [datetime]::UtcNow,
+        [hashtable] $DashboardUrl = @{}
     )
     $slug = [string] $System.system.slug
     $domain = [string] $System.cluster.domain
     $apps = @($System.deployables | Where-Object { [string] $_['hosting'] -notin 'staticsite', 'staticwebapp' })
+    $dashboards = @($System.deployables | Where-Object { [string] $_['hosting'] -in 'staticsite', 'staticwebapp' })
     $first = [string] @($System.deployables)[0].name
     $githubOrg = [string] $System.system['githubOrg']
     $repositoryName = [string] $System.system['repository']
@@ -173,6 +177,35 @@ function ConvertTo-ClusterTopology {
                         pinHistoryUrl = if ($repository) { "https://github.com/$repository/commits/$pinPath" } else { $null }
                         links         = $deployableLinks
                         nodes         = @($node)
+                    }
+                })
+            $deployables += @(foreach ($dashboard in $dashboards) {
+                    $dashboardName = [string] $dashboard.name
+                    $address = [string] $DashboardUrl["$environmentName/$dashboardName"]
+                    if (-not $address) { continue }
+                    $inCluster = [string] $dashboard.hosting -eq 'staticsite'
+                    $pinPath = "main/gitops/environments/$environmentName/$dashboardName/kustomization.yaml"
+                    [ordered] @{
+                        name          = $dashboardName
+                        projectUrl    = if ($projects) { "$projects/$slug-$dashboardName" } else { $null }
+                        frontDoor     = $null
+                        healthPath    = '/'
+                        alivePath     = '/'
+                        # The site's build writes its version there (the dashboard repository's build.yml).
+                        versionPath   = '/version.json'
+                        telemetryPath = $null
+                        # An empty list: the traffic button leaves the dashboards alone.
+                        trafficPaths  = @()
+                        buildPath     = $null
+                        # In the cluster the pin is the image tag in Git; outside it there is no file of that form.
+                        pinUrl        = if ($inCluster -and $repository) { "https://raw.githubusercontent.com/$repository/$pinPath" } else { $null }
+                        pinHistoryUrl = if ($inCluster -and $repository) { "https://github.com/$repository/commits/$pinPath" } else { $null }
+                        links         = [ordered] @{}
+                        nodes         = @([ordered] @{
+                                name = if ($inCluster) { "$namespace/$dashboardName" } else { "swa-$slug-$environmentName-$dashboardName" }
+                                role = 'primary'
+                                url  = $address
+                            })
                     }
                 })
             [ordered] @{
@@ -274,7 +307,9 @@ function ConvertTo-ClusterDiagram {
     $statics = @($System.deployables | Where-Object { [string] $_['hosting'] -eq 'staticsite' })
     $sites = @($System.deployables | Where-Object { [string] $_['hosting'] -eq 'staticwebapp' })
     $topologyEnvironment = @($Topology.environments | Where-Object { $_.name -eq $Environment }) | Select-Object -First 1
-    $apps = if ($topologyEnvironment) { @($topologyEnvironment.deployables) } else { @() }
+    # The apps of the topology; a dashboard is a deployable there too (it is checked), and a site of its own here.
+    $dashboardNames = @(@($statics) + @($sites) | ForEach-Object { [string] $_.name })
+    $apps = if ($topologyEnvironment) { @($topologyEnvironment.deployables | Where-Object { $dashboardNames -notcontains [string] $_.name }) } else { @() }
     $clusterName = [string] $System.cluster.name
     $nodeText = "$([string] $System.cluster['nodeCount']) x $([string] $System.cluster['nodeSize'])"
     $edition = if ($System['sql'] -and $System.sql['edition']) { [string] $System.sql.edition } else { '' }
@@ -362,7 +397,7 @@ function ConvertTo-ClusterDiagram {
     foreach ($static in $statics) {
         $alias = "swa_$(Get-DeployableAlias $static.name)"
         $lines.Add("        Container($alias, $(Get-Quoted ([string] $static.name)), $(Get-Quoted "static site: $($static.name)"), $(Get-Quoted $smallTileSlot))")
-        $address = if ($DashboardUrl[[string] $static.name]) { [string] $DashboardUrl[[string] $static.name] } else { $null }
+        $address = if ($DashboardUrl["$Environment/$($static.name)"]) { [string] $DashboardUrl["$Environment/$($static.name)"] } else { $null }
         $nodes.Add([ordered] @{ alias = $alias; qualifiedName = "$path.$alias"; kind = 'staticsite'; deployable = [string] $static.name; name = "$namespace/$($static.name)"; region = $namespace; regionAlias = 'region_primary'; url = $address })
     }
     $lines.Add('      }')
@@ -372,7 +407,7 @@ function ConvertTo-ClusterDiagram {
         $alias = "swa_$(Get-DeployableAlias $site.name)"
         $siteName = "swa-$slug-$Environment-$($site.name)"
         $lines.Add("    Container($alias, $(Get-Quoted $siteName), $(Get-Quoted "Azure Static Web App: $($site.name)"), $(Get-Quoted $smallTileSlot))")
-        $address = if ($DashboardUrl[[string] $site.name]) { [string] $DashboardUrl[[string] $site.name] } else { $null }
+        $address = if ($DashboardUrl["$Environment/$($site.name)"]) { [string] $DashboardUrl["$Environment/$($site.name)"] } else { $null }
         $nodes.Add([ordered] @{ alias = $alias; qualifiedName = "sub.rg_cluster.$alias"; kind = 'staticsite'; deployable = [string] $site.name; name = $siteName; url = $address })
     }
     $lines.Add('  }')
@@ -388,7 +423,8 @@ function ConvertTo-ClusterDiagram {
         Add-Edge "app_${key}_primary" 'sqldb' 'sql' 'reads and writes' 'TCP 1433' $true
     }
     foreach ($static in @($statics) + @($sites)) {
-        Add-Edge 'browser' "swa_$(Get-DeployableAlias $static.name)" 'dashboard' 'loads the dashboard' 'HTTPS' $false
+        # The label is a link to that dashboard, where its address is known.
+        Add-Edge 'browser' "swa_$(Get-DeployableAlias $static.name)" 'dashboard' 'loads the dashboard' 'HTTPS' $false ([string] $DashboardUrl["$Environment/$($static.name)"])
     }
     $lines.AddRange($edgeLines)
     $lines.Add('@enduml')
@@ -616,24 +652,29 @@ else {
     # The site's own address, in every environment: a convention, so each environment's diagram can say "This page".
     $url = "https://$slug-$environmentName-$name.$domain"
 }
-# Where the system's dashboards are, for the diagrams: this one (so the page can say "This page"), every site in the
-# cluster by convention, and a site outside it by what its own deployment recorded in Git (nothing before its first).
+# Where the system's dashboards are, in every environment ("<environment>/<name>"), for the topology (each dashboard
+# checks the others) and the diagrams: this one, every site in the cluster by convention, and a site outside it by
+# what its own deployment recorded in Git (nothing before its first deployment there).
 $dashboardUrls = @{}
 foreach ($other in @($system.deployables | Where-Object { [string] $_['hosting'] -in 'staticsite', 'staticwebapp' })) {
     $otherName = [string] $other.name
-    if ($otherName -eq $name) { $dashboardUrls[$otherName] = $url }
-    elseif ([string] $other.hosting -eq 'staticsite') { $dashboardUrls[$otherName] = "https://$slug-$environmentName-$otherName.$domain" }
-    else {
-        try {
-            $recorded = Invoke-RestMethod -Uri "https://api.github.com/repos/$repository/contents/gitops/environments/$environmentName/$otherName/site.json?ref=main" -Headers $headers
-            $text = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(($recorded.content -replace '\s', '')))
-            if ($text -match '"url"\s*:\s*"(https://[^"]+)"') { $dashboardUrls[$otherName] = $Matches[1] }
+    foreach ($otherEnvironment in @($system.environments | ForEach-Object { [string] $_.name })) {
+        $key = "$otherEnvironment/$otherName"
+        if ($otherName -eq $name -and $otherEnvironment -eq $environmentName) { $dashboardUrls[$key] = $url }
+        elseif ([string] $other.hosting -eq 'staticsite') { $dashboardUrls[$key] = "https://$slug-$otherEnvironment-$otherName.$domain" }
+        else {
+            $record = "gitops/environments/$otherEnvironment/$otherName/site.json"
+            try {
+                $recorded = Invoke-RestMethod -Uri "https://api.github.com/repos/$repository/contents/${record}?ref=main" -Headers $headers
+                $text = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(($recorded.content -replace '\s', '')))
+                if ($text -match '"url"\s*:\s*"(https://[^"]+)"') { $dashboardUrls[$key] = $Matches[1] }
+            }
+            catch { Write-Host "$otherName has recorded no address in $otherEnvironment yet ($record): it is no node there, and its tile in the diagram has no address." }
         }
-        catch { Write-Host "$otherName has recorded no address in $environmentName yet (gitops/environments/$environmentName/$otherName/site.json): its node in the diagram has none." }
     }
 }
 
-$topology = ConvertTo-ClusterTopology -System $system
+$topology = ConvertTo-ClusterTopology -System $system -DashboardUrl $dashboardUrls
 $nodeCount = 0
 foreach ($environment in $topology.environments) { foreach ($deployable in $environment.deployables) { $nodeCount += @($deployable.nodes).Count } }
 Write-Host "topology.json of $($topology.generated): $(@($topology.environments).Count) environment(s), $nodeCount node(s); pins are read from each app's kustomization on main of $($topology.system.repository)."
@@ -763,6 +804,10 @@ if ($outside) {
         $target = if ($key -like 'runtime-*') { Join-Path $folder 'runtime' $key.Substring('runtime-'.Length) } else { Join-Path $folder $key }
         Set-Content -LiteralPath $target -Value $files[$key] -Encoding utf8NoBOM -NoNewline
     }
+
+    # Any origin may read the site's files (GET, no credentials): the dashboards in the cluster check this one from the
+    # visitor's browser, as this one checks them.
+    Set-Content -LiteralPath (Join-Path $folder 'staticwebapp.config.json') -Encoding utf8NoBOM -Value (@{ globalHeaders = @{ 'Access-Control-Allow-Origin' = '*' } } | ConvertTo-Json)
 
     # The deployment token of the site: read now, kept in this variable only, handed to the CLI through its environment
     # variable (never an argument, which a process list shows), and removed from the environment when the CLI has ended.
