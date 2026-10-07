@@ -707,7 +707,13 @@ $checks = [ordered] @{
         $estimated = @($entries | Where-Object { $environments -contains [string] $_['name'] -and $_['estimate'] -is [hashtable] } | ForEach-Object { [string] $_['name'] })
         if (-not $dormant -and $dashboards.Count -gt 0) {
             $without = @($environments | Where-Object { $estimated -notcontains $_ })
-            Assert-That ($without.Count -eq 0) "cost.json has no estimate of the cluster's cost for $($without -join ', '): the cluster's status file did not answer the last hourly run"
+            # A file written while the cluster slept has no estimate, and the cluster may have woken since (this check
+            # ends the build that wakes it): the next hourly run adds it. A file that stays without one is a failure.
+            $written = if ([string] $cost['generated'] -match '^\d{4}-') { [datetimeoffset]::Parse([string] $cost['generated'], [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal) } elseif ($cost['generated'] -is [datetime]) { [datetimeoffset] $cost['generated'].ToUniversalTime() } else { $null }
+            if ($without.Count -gt 0 -and $written -and ([datetimeoffset]::UtcNow - $written).TotalMinutes -lt 90) {
+                Skip-Check "cost.json of $($written.ToString('HH:mm')) UTC has no estimate of the cluster's cost yet (the cluster's status file did not answer that run): the next hourly run of workflow delivery adds it"
+            }
+            Assert-That ($without.Count -eq 0) "cost.json has no estimate of the cluster's cost for $($without -join ', '): the cluster's status file did not answer the hourly runs of workflow delivery"
         }
         "cost as of $($cost['asOf']): $($cost['currency']) $($cost.system['monthToDate']) this month for $($named -join ', ')$(if ($estimated.Count -gt 0) { "; an estimated part of the cluster for $($estimated -join ', ')" })"
     }
