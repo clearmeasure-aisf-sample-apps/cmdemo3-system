@@ -163,6 +163,30 @@ resource whatIfRole 'Microsoft.Authorization/roleDefinitions@2022-04-01' = {
   }
 }
 
+// Runtime aks-argocd, a dashboard on Azure Static Web Apps (hosting "staticwebapp"): its Octopus project finds the
+// site and reads its deployment token as the tier's deploy identity. No built-in role has those two actions without
+// far more (Website Contributor covers web apps, Microsoft.Web/sites, not static sites: lesson 58), so the seed
+// defines this one, assignable to the cluster's group only.
+resource siteDeployRole 'Microsoft.Authorization/roleDefinitions@2022-04-01' = if (hasCluster) {
+  name: guid(subscription().id, slug, 'static-site-deploy')
+  properties: {
+    roleName: 'Static site deployment (${slug})'
+    // No angle brackets: Azure refuses a role whose name or description looks like it holds an HTML tag.
+    description: 'Reads a Static Web App and its deployment token, for the uploads by the deploy identities of ${slug}.'
+    type: 'CustomRole'
+    permissions: [
+      {
+        actions: [
+          'Microsoft.Web/staticSites/read'
+          'Microsoft.Web/staticSites/listSecrets/action'
+        ]
+        notActions: []
+      }
+    ]
+    assignableScopes: [clusterGroup.id]
+  }
+}
+
 module nonprodWhatIf 'modules/role-assignment.bicep' = {
   name: 'seed-${slug}-nonprod-what-if'
   scope: nonprodGroup
@@ -220,6 +244,7 @@ module cluster 'modules/seed-cluster.bicep' = if (hasCluster) {
     planPrincipalId: nonprod.outputs.plan.principalId
     whatIfRoleName: whatIfRole.name
     deployPrincipalIds: [nonprod.outputs.deploy.principalId, prod.outputs.deploy.principalId]
+    siteDeployRoleName: siteDeployRole!.name
   }
 }
 

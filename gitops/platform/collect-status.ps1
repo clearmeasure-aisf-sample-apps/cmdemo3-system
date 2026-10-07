@@ -90,7 +90,8 @@ function Get-Workload {
     $name = [string] $owner.name
     switch ([string] $owner.kind) {
         'ReplicaSet' { return @{ kind = 'Deployment'; workload = $name -replace '-[a-z0-9]{5,10}$', '' } }
-        'Job' { return @{ kind = 'Job'; workload = $name -replace '-\d{6,}$', '' } }
+        # db-backup-29853070 (a CronJob's run), restore-test-20261005-040540 (a job named by its time).
+        'Job' { return @{ kind = 'Job'; workload = $name -replace '(-\d{6,})+$', '' } }
         default { return @{ kind = [string] $owner.kind; workload = $name } }
     }
 }

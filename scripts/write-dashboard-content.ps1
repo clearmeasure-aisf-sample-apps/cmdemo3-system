@@ -599,11 +599,16 @@ if ($outside) {
     }
     $resourceGroup = [string] $system.azure.resourceGroups.cluster
     $staticSite = "swa-$slug-$environmentName-$name"
+    # Azure's own words when it refuses or finds nothing: as information, then the failure (lesson 58: the first
+    # deployment hid them, and the cause was a role without the action).
     $PSNativeCommandUseErrorActionPreference = $false
-    $hostName = ([string] (az staticwebapp show --name $staticSite --resource-group $resourceGroup --query defaultHostname --only-show-errors --output tsv 2>$null)).Trim()
+    $shown = @(az staticwebapp show --name $staticSite --resource-group $resourceGroup --query defaultHostname --only-show-errors --output tsv 2>&1 | ForEach-Object { "$_" })
+    $shownCode = $LASTEXITCODE
     $PSNativeCommandUseErrorActionPreference = $true
-    if (-not $hostName) {
-        Fail-Step "$resourceGroup has no Static Web App ${staticSite} that this identity can read: workflow system creates it (infra/cluster.bicep, job cluster-apply) after system.json names the deployable, and the seed lets the deploy identities read it (new-demo-seed.ps1)."
+    $hostName = if ($shownCode -eq 0) { "$($shown | Select-Object -Last 1)".Trim() } else { '' }
+    if ($hostName -notmatch '^[a-z0-9.-]+$') {
+        $shown | Where-Object { $_.Trim() } | ForEach-Object { Write-Host "  az: $_" }
+        Fail-Step "This identity cannot read the Static Web App $staticSite in $resourceGroup (Azure's answer is above). Workflow system creates the site (infra/cluster.bicep, job cluster-apply) after system.json names the deployable, and the seed gives the deploy identities the role 'Static site deployment ($slug)' on that group (new-demo-seed.ps1)."
     }
     $url = "https://$hostName"
 }
@@ -761,7 +766,7 @@ if ($outside) {
 
     # The deployment token of the site: read now, kept in this variable only, handed to the CLI through its environment
     # variable (never an argument, which a process list shows), and removed from the environment when the CLI has ended.
-    $token = ([string] (az staticwebapp secrets list --name $staticSite --resource-group $resourceGroup --query properties.apiKey --only-show-errors --output tsv)).Trim()
+    $token = "$(az staticwebapp secrets list --name $staticSite --resource-group $resourceGroup --query properties.apiKey --only-show-errors --output tsv)".Trim()
     if (-not $token) { Fail-Step "Azure returned no deployment token for $staticSite." }
 
     # The CLI (and npx before it) reports its progress on stderr, which Octopus would log as errors: everything it
