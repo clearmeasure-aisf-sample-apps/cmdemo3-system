@@ -658,6 +658,11 @@ $checks = [ordered] @{
         $service = $facts | ConvertFrom-Json -AsHashtable
         Assert-That ($service['availability'] -is [hashtable] -and $service.availability['state'] -and $service['powerState']) 'aks.json has no verdict of Azure Resource Health or no power state'
         if ($dormant) {
+            # Workflow cluster-status publishes after every run of workflow system, and this check is the end of that
+            # run: facts from before the cluster stopped are not wrong yet. An hour later they are.
+            if ([string] $service.powerState -ne 'Stopped' -and $age.TotalMinutes -lt 60) {
+                Skip-Check "the cluster is dormant, and Azure's facts ($([int] $age.TotalMinutes) min old) still say $($service.powerState): the next run of workflow cluster-status publishes the stop"
+            }
             Assert-That ([string] $service.powerState -eq 'Stopped') "the cluster is dormant, and Azure's facts say $($service.powerState)"
             return "the cluster sleeps and Azure's facts say so ($($service.availability.state), $($service.powerState), $([int] $age.TotalMinutes) min old)"
         }
