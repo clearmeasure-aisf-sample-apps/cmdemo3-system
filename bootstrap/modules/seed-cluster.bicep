@@ -19,7 +19,7 @@ param octopusIssuer string
 @description('Octopus OIDC subject of the container feed that reads the registry: space:<space slug>:feed:<feed slug>.')
 param feedSubject string
 
-@description('Principal of id-<slug>-plan: reads this group for the previews and the drift check.')
+@description('Principal of id-<slug>-plan: reads this group for the previews and the drift check, and its cost.')
 param planPrincipalId string
 
 @description('Name of the role "Deployment what-if (<slug>)" the seed defines.')
@@ -62,6 +62,15 @@ module planReader 'role-assignment.bicep' = {
     principalId: planPrincipalId
     roleDefinitionId: 'acdd72a7-3385-48ef-bd42-f606fba81ae7' // Reader
     description: 'id-${slug}-plan: what-if previews and drift checks of the cluster'
+  }
+}
+
+module planCostReader 'role-assignment.bicep' = {
+  name: 'seed-${slug}-cluster-cost-reader'
+  params: {
+    principalId: planPrincipalId
+    roleDefinitionId: '72fafb9e-0641-4937-9268-a91bfd8191a3' // Cost Management Reader
+    description: 'id-${slug}-plan: the cost of the cluster, for the health dashboard'
   }
 }
 

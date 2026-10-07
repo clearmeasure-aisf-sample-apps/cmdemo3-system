@@ -90,6 +90,6 @@ jobs:
             Get-Content -LiteralPath "$env:RUNNER_TEMP/findings.md" >> $env:GITHUB_STEP_SUMMARY
           }
           if ($code -notin 0, 1) {
-            Write-Host "FAIL test-fleet.ps1 ended with $code: a source could not be read, so the findings are incomplete"
+            Write-Host "FAIL test-fleet.ps1 ended with ${code}: a source could not be read, so the findings are incomplete"
             exit 1
           }

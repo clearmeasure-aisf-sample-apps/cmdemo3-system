@@ -62,7 +62,8 @@ resource stateContainer 'Microsoft.Storage/storageAccounts/blobServices/containe
   name: 'tfstate'
 }
 
-// The plan identity: what-if previews of pull requests and the nightly drift check (Reader).
+// The plan identity: what-if previews of pull requests, the nightly drift check (Reader) and the cost the health
+// dashboard shows (Cost Management Reader).
 resource plan 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
   name: 'id-${slug}-plan'
   location: location
@@ -96,6 +97,18 @@ module planReader 'role-assignment.bicep' = {
     principalId: plan.properties.principalId
     roleDefinitionId: 'acdd72a7-3385-48ef-bd42-f606fba81ae7' // Reader
     description: 'id-${slug}-plan: what-if previews and drift checks of nonprod'
+  }
+}
+
+// What the environments cost, for the health dashboard (workflow "delivery", scripts/write-cost.ps1): the plan identity
+// asks Cost Management at the scope of each of the system's groups, so the role is assigned per group, never on the
+// subscription.
+module planCostReader 'role-assignment.bicep' = {
+  name: 'seed-${slug}-nonprod-cost-reader'
+  params: {
+    principalId: plan.properties.principalId
+    roleDefinitionId: '72fafb9e-0641-4937-9268-a91bfd8191a3' // Cost Management Reader
+    description: 'id-${slug}-plan: the cost of nonprod, for the health dashboard'
   }
 }
 

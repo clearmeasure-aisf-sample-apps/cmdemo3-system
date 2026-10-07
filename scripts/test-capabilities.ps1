@@ -682,6 +682,30 @@ $checks = [ordered] @{
         $pods = @($spaces | ForEach-Object { $_['pods'] } | Where-Object { $_ })
         "live from the cluster ($($nodes.Count) node(s), $($pods.Count) pod(s) in $($spaces.Count) namespaces, $([int] $liveAge.TotalSeconds) s old) and from Azure ($($service.availability.state), $($service.powerState), $([int] $age.TotalMinutes) min old)"
     }
+    'CAP-083' = {
+        # What each environment costs, where a browser can read it: workflow delivery publishes cost.json next to
+        # delivery.json on branch status, no older than two days (Azure's cost data is a day behind), with every
+        # environment, what they share, and the system's month so far. One cluster runs every environment, so each
+        # one also has an estimate of its part of it, unless the cluster sleeps (the estimate needs its status file).
+        $branches = @(gh api "repos/$systemRepo/branches" --paginate --jq '.[].name')
+        if ($branches -notcontains 'status') { Skip-Check 'workflow delivery has not published branch status yet' }
+        $files = @(gh api "repos/$systemRepo/contents?ref=status" --jq '.[].name')
+        if ($files -notcontains 'cost.json') { Skip-Check 'branch status has no cost.json yet: the hourly run of workflow delivery writes it' }
+        $cost = Get-RepoFile $systemRepo 'cost.json?ref=status' | ConvertFrom-Json -AsHashtable
+        $asOf = [datetime]::ParseExact([string] $cost['asOf'], 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal -bor [Globalization.DateTimeStyles]::AdjustToUniversal)
+        Assert-That ($asOf -gt [datetime]::UtcNow.AddDays(-3)) "cost.json on branch status is as of $($cost['asOf']): workflow delivery has not read the cost for more than two days"
+        $entries = @($cost['environments'] | Where-Object { $_ })
+        $named = @($entries | ForEach-Object { [string] $_['name'] })
+        $absent = @(@($environments) + 'shared' | Where-Object { $named -notcontains $_ })
+        Assert-That ($absent.Count -eq 0) "cost.json does not list $($absent -join ', ')"
+        Assert-That ($cost['system'] -is [hashtable] -and $null -ne $cost.system['monthToDate']) 'cost.json has no cost of the system for the month: a resource group could not be read (the node group needs a seed run after the cluster exists)'
+        $estimated = @($entries | Where-Object { $environments -contains [string] $_['name'] -and $_['estimate'] -is [hashtable] } | ForEach-Object { [string] $_['name'] })
+        if (-not $dormant -and $dashboards.Count -gt 0) {
+            $without = @($environments | Where-Object { $estimated -notcontains $_ })
+            Assert-That ($without.Count -eq 0) "cost.json has no estimate of the cluster's cost for $($without -join ', '): the cluster's status file did not answer the last hourly run"
+        }
+        "cost as of $($cost['asOf']): $($cost['currency']) $($cost.system['monthToDate']) this month for $($named -join ', ')$(if ($estimated.Count -gt 0) { "; an estimated part of the cluster for $($estimated -join ', ')" })"
+    }
 }
 
 

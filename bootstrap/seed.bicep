@@ -22,6 +22,9 @@ param prodResourceGroupName string
 @description('Runtime aks-argocd: the resource group of the one AKS cluster every environment runs in. Empty for runtime containerapps.')
 param clusterResourceGroupName string = ''
 
+@description('Runtime aks-argocd: the cluster\'s node resource group (<cluster group>-nodes), once AKS has created it; empty before, and for Container Apps. The plan identity reads its cost for the health dashboard.')
+param clusterNodeResourceGroupName string = ''
+
 @description('GitHub organization that owns the system and app repositories.')
 param githubOrg string
 
@@ -48,6 +51,13 @@ param environments array
 
 @description('True for a system with a public address per environment: the seed then creates the resource group rg-<slug>-edge with the system\'s one Azure Front Door profile (Standard, a monthly base fee), which every environment with capability "frontdoor" adds its endpoint to.')
 param frontDoor bool = false
+
+@description('True once a deployable takes secrets the operator supplies (system.json deployables[].secrets): the identity that applies this seed then gets a role on the two tier groups that may set a secret in the environments\' vaults and list secret names, but not read a value (the skill\'s set-demo-secret.ps1).')
+param operatorSecretWriter bool = false
+
+@description('ServicePrincipal when the operator identity applies the seed; User for a person\'s login.')
+@allowed(['ServicePrincipal', 'User'])
+param operatorPrincipalType string = 'ServicePrincipal'
 
 @description('True (the default) for a system whose apps are container images: runtime aks-argocd, or a first app hosted as a container app. False for a system that needs no registry (first app on App Service: zips in the Octopus built-in feed): the seed then creates no registry, no identity id-<slug>-acr-push, no ACR role and no ACR role assignment; the output registry is {} and identities has no acrPush. The deployment is incremental: false deletes nothing that an earlier run created (remove-demo-registry.ps1 of the demo-environment skill does).')
 param containerRegistry bool = true
@@ -207,8 +217,57 @@ module prodWhatIf 'modules/role-assignment.bicep' = {
   }
 }
 
-// Cross-group grants: the plan identity reads prod, and (with a registry) prod's runtime identities pull from the
-// registry in nonprod.
+// Operator-supplied secrets (system.json deployables[].secrets without "generate"): their values go from the operator
+// straight into an environment's vault, never through a repository, a pipeline variable or a log. A stack's deny
+// settings cover the control plane only, so what the operator lacks for that is a data-plane role: this one sets a
+// secret and lists names, and cannot read a value. On the tier groups, so it reaches the vaults of environments that
+// do not exist yet.
+resource secretWriterRole 'Microsoft.Authorization/roleDefinitions@2022-04-01' = if (operatorSecretWriter) {
+  name: guid(subscription().id, slug, 'key-vault-secret-writer')
+  properties: {
+    roleName: 'Key Vault secret writer (${slug})'
+    description: 'Set a secret in the vaults of ${slug} and list secret names, without reading a value: the operator supplies the secrets of a deployable (set-demo-secret.ps1).'
+    type: 'CustomRole'
+    permissions: [
+      {
+        actions: []
+        notActions: []
+        dataActions: [
+          'Microsoft.KeyVault/vaults/secrets/setSecret/action'
+          'Microsoft.KeyVault/vaults/secrets/readMetadata/action'
+        ]
+        notDataActions: []
+      }
+    ]
+    assignableScopes: [nonprodGroup.id, prodGroup.id]
+  }
+}
+
+module nonprodSecretWriter 'modules/role-assignment.bicep' = if (operatorSecretWriter) {
+  name: 'seed-${slug}-nonprod-secret-writer'
+  scope: nonprodGroup
+  params: {
+    principalId: deployer().objectId
+    principalType: operatorPrincipalType
+    roleDefinitionId: secretWriterRole!.name
+    description: 'The operator: secret values of the deployables of nonprod (set-demo-secret.ps1)'
+  }
+}
+
+module prodSecretWriter 'modules/role-assignment.bicep' = if (operatorSecretWriter) {
+  name: 'seed-${slug}-prod-secret-writer'
+  scope: prodGroup
+  params: {
+    principalId: deployer().objectId
+    principalType: operatorPrincipalType
+    roleDefinitionId: secretWriterRole!.name
+    description: 'The operator: secret values of the deployables of prod (set-demo-secret.ps1)'
+  }
+}
+
+// Cross-group grants: the plan identity reads prod and its cost (scripts/write-cost.ps1; every group of the system
+// has the same assignment, in its own module), and (with a registry) prod's runtime identities pull from the registry
+// in nonprod.
 module prodReader 'modules/role-assignment.bicep' = {
   name: 'seed-${slug}-prod-reader'
   scope: prodGroup
@@ -216,6 +275,16 @@ module prodReader 'modules/role-assignment.bicep' = {
     principalId: nonprod.outputs.plan.principalId
     roleDefinitionId: 'acdd72a7-3385-48ef-bd42-f606fba81ae7' // Reader
     description: 'id-${slug}-plan: what-if previews and drift checks of prod'
+  }
+}
+
+module prodCostReader 'modules/role-assignment.bicep' = {
+  name: 'seed-${slug}-prod-cost-reader'
+  scope: prodGroup
+  params: {
+    principalId: nonprod.outputs.plan.principalId
+    roleDefinitionId: '72fafb9e-0641-4937-9268-a91bfd8191a3' // Cost Management Reader
+    description: 'id-${slug}-plan: the cost of prod, for the health dashboard'
   }
 }
 
@@ -245,6 +314,22 @@ module cluster 'modules/seed-cluster.bicep' = if (hasCluster) {
     whatIfRoleName: whatIfRole.name
     deployPrincipalIds: [nonprod.outputs.deploy.principalId, prod.outputs.deploy.principalId]
     siteDeployRoleName: siteDeployRole!.name
+  }
+}
+
+// The nodes, their disks and the load balancer are in the group AKS creates for them: most of what the cluster costs.
+// The seed cannot create that group (AKS must), so the grant comes with the first seed that finds it.
+resource clusterNodeGroup 'Microsoft.Resources/resourceGroups@2024-03-01' existing = if (!empty(clusterNodeResourceGroupName)) {
+  name: empty(clusterNodeResourceGroupName) ? 'unused' : clusterNodeResourceGroupName
+}
+
+module clusterNodesCostReader 'modules/role-assignment.bicep' = if (!empty(clusterNodeResourceGroupName)) {
+  name: 'seed-${slug}-cluster-nodes-cost-reader'
+  scope: clusterNodeGroup
+  params: {
+    principalId: nonprod.outputs.plan.principalId
+    roleDefinitionId: '72fafb9e-0641-4937-9268-a91bfd8191a3' // Cost Management Reader
+    description: 'id-${slug}-plan: the cost of the cluster\'s nodes, for the health dashboard'
   }
 }
 

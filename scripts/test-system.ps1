@@ -75,6 +75,15 @@ foreach ($identity in 'cluster', 'aks', 'kubelet', 'feed', 'backup') {
 Test-Rule 'backup storage' ($system.azure.ContainsKey('backup') -and -not [string]::IsNullOrWhiteSpace([string] $system.azure.backup['storageAccount']) -and -not [string]::IsNullOrWhiteSpace([string] $system.azure.backup['container'])) 'azure.backup.storageAccount and container: the seed creates them; run phase 2 again'
 $deployableNames = @($system.deployables | ForEach-Object { [string] $_.name })
 Test-Rule 'deployables present' ($deployableNames.Count -gt 0)
+# Not in this runtime: the keys of a container-app deployable in the other runtime (its own environments, an always-on
+# replica, settings and secrets from a Key Vault). Here every deployable runs in every namespace from the templates of
+# gitops/, and no template reads these keys: a deployable that carried them would silently run without them.
+foreach ($deployable in @($system.deployables)) {
+    $unsupported = @('environments', 'alwaysOn', 'alwaysOnEnvironments', 'database', 'cpu', 'settings', 'environmentSettings', 'urlSetting', 'secrets' | Where-Object { $deployable.ContainsKey($_) })
+    if ($unsupported.Count -gt 0) {
+        Test-Rule "deployable $($deployable.name) keys" $false "$($unsupported -join ', ') are not supported by runtime aks-argocd (they belong to container-app deployables of runtime containerapps): remove them"
+    }
+}
 foreach ($name in $deployableNames) {
     Test-Rule "deployable $name name" ($name -cmatch '^[a-z](?:[a-z0-9]|-(?=[a-z0-9])){1,9}$') 'lowercase letters, digits and inner hyphens, 2 to 10'
     Test-Rule "deployable $name is not 'system'" ($name -cne 'system') 'the Octopus project <slug>-system is the environments project'
