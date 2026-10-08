@@ -20,11 +20,12 @@
          "Update deployable", which is not always the release number.
       3. Waits until the Deployment runs that tag with every replica available.
     It changes nothing when the file does not pin this deployment's tag (the step before it never committed, or a later
-    deployment moved it), or when the release redeployed is the one that ran (nothing changed in Git). The commit goes through the GitHub API with GitHub.Token, as the pin commits of the other
-    runtime do; the token is never printed or passed as an argument.
+    deployment moved it), or when the release redeployed is the one that ran (nothing changed in Git). The commit goes
+    through the GitHub API as the system's own GitHub App or, in a system without one, with the stored GitHub.Token
+    (scripts/github-token.ps1), as the pin commits of the other runtime do; the token is never printed or passed as an
+    argument.
 #>
-[CmdletBinding()]
-param()
+# No param block: octopus/projects.tf joins scripts/github-token.ps1 and this file into one script, this one second.
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -77,8 +78,11 @@ else {
 # 2. The previous tag back in Git, unless the file does not pin this deployment's tag.
 $path = "gitops/environments/$environmentName/$deployable/kustomization.yaml"
 $uri = "https://api.github.com/repos/$repository/contents/$path"
+# As the system's own GitHub App, with a token made now for this repository, or with the stored token of a system
+# that has no App: Get-SystemGitHubToken of scripts/github-token.ps1, which octopus/projects.tf joins with this
+# script into the step's one script body.
 $headers = @{
-    Authorization          = "Bearer $([string] $OctopusParameters['GitHub.Token'])"
+    Authorization          = "Bearer $(Get-SystemGitHubToken -Permission @{ contents = 'write' })"
     Accept                 = 'application/vnd.github+json'
     'X-GitHub-Api-Version' = '2022-11-28'
 }

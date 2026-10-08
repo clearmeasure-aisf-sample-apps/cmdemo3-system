@@ -20,8 +20,9 @@
          namespace with the app, SQL Server and this site, and the browser. Every drawn element the page updates is
          checked in the SVG.
       3. Commits all of it as one ConfigMap, <name>-content, to gitops/environments/<env>/<name>/content.yaml through
-         the GitHub API (GitHub.Token, never printed or passed as an argument). Argo CD applies the commit and the
-         kubelet refreshes the files the site's web server reads; nothing restarts.
+         the GitHub API (scripts/github-token.ps1: the system's App or the stored token, never printed or passed as
+         an argument). Argo CD applies the commit and the kubelet refreshes the files the site's web server reads;
+         nothing restarts.
       4. Waits until the site serves the topology it wrote.
     The links into the Azure portal are conventions over system.json (the cluster, and with capability "telemetry" the
     environment's Application Insights); the portal asks the viewer to sign in.
@@ -40,8 +41,7 @@
     collector of gitops/platform/cluster-status.yaml) and Azure's facts about the AKS service (workflow
     cluster-status publishes them to branch "cluster-status").
 #>
-[CmdletBinding()]
-param()
+# No param block: octopus/projects.tf joins scripts/github-token.ps1 and this file into one script, this one second.
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -616,8 +616,11 @@ $project = [string] $OctopusParameters['Octopus.Project.Name']
 
 # system.json on main, through the API (raw.githubusercontent.com caches for minutes): the current desired state of
 # the whole system, not the commit of an older release.
+# As the system's own GitHub App, with a token made now for this repository, or with the stored token of a system
+# that has no App: Get-SystemGitHubToken of scripts/github-token.ps1, which octopus/projects.tf joins with this
+# script into the step's one script body.
 $headers = @{
-    Authorization          = "Bearer $([string] $OctopusParameters['GitHub.Token'])"
+    Authorization          = "Bearer $(Get-SystemGitHubToken -Permission @{ contents = 'write' })"
     Accept                 = 'application/vnd.github+json'
     'X-GitHub-Api-Version' = '2022-11-28'
 }

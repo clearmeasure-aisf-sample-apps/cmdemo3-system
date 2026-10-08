@@ -124,8 +124,9 @@ resource "octopusdeploy_variable" "azure_account" {
 
 # The deployable projects' step "Revert pin" commits the previous image tag back through the GitHub API with this
 # token (repository secret OCTOPUS_GITHUB_TOKEN, the same token as the Git credential of the Argo CD steps).
+# Only in a system without a GitHub App of its own (github.tf).
 resource "octopusdeploy_variable" "github_token" {
-  for_each = octopusdeploy_project.deployable
+  for_each = local.github_app == null ? octopusdeploy_project.deployable : {}
 
   owner_id        = each.value.id
   name            = "GitHub.Token"

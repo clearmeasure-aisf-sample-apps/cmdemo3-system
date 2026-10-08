@@ -9,12 +9,12 @@
 .DESCRIPTION
     Step "Verify deployable" of the Octopus project of a site with hosting "staticwebapp", on the hosted worker pool;
     octopus/projects.tf inlines this file. Reads gitops/environments/<env>/<name>/site.json on main through the
-    GitHub API (GitHub.Token, never printed), where step "Update deployable" recorded the site's address, the release
-    and the time of its topology, then asks the site for its start page and its topology.json. Fails when the record is
-    not of this release, or the site does not answer 200, or its topology is another one.
+    GitHub API (scripts/github-token.ps1: the system's App or the stored token, never printed), where step "Update
+    deployable" recorded the site's address, the release and the time of its topology, then asks the site for its
+    start page and its topology.json. Fails when the record is not of this release, or the site does not answer 200,
+    or its topology is another one.
 #>
-[CmdletBinding()]
-param()
+# No param block: octopus/projects.tf joins scripts/github-token.ps1 and this file into one script, this one second.
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -33,8 +33,11 @@ if ($siteEnvironments.Count -gt 0 -and $siteEnvironments -notcontains $environme
     return
 }
 $path = "gitops/environments/$environmentName/$name/site.json"
+# As the system's own GitHub App, with a token made now for this repository, or with the stored token of a system
+# that has no App: Get-SystemGitHubToken of scripts/github-token.ps1, which octopus/projects.tf joins with this
+# script into the step's one script body.
 $headers = @{
-    Authorization          = "Bearer $([string] $OctopusParameters['GitHub.Token'])"
+    Authorization          = "Bearer $(Get-SystemGitHubToken -Permission @{ contents = 'read' })"
     Accept                 = 'application/vnd.github+json'
     'X-GitHub-Api-Version' = '2022-11-28'
 }

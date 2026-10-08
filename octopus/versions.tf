@@ -9,8 +9,9 @@
 #   terraform init -backend-config=resource_group_name=<rg> -backend-config=storage_account_name=<account> \
 #     -backend-config=container_name=tfstate -backend-config=key=octopus.tfstate -backend-config=use_azuread_auth=true
 #
-# The state holds one secret: the token of the Git credential the Argo CD steps commit with. The state account allows no
-# shared key and no public blob access; only id-<slug>-octopus-config can read it.
+# The state holds the token of the Git credential the Argo CD steps commit with and, in a system with a GitHub App of
+# its own, that App's private key (GitHub.AppPrivateKey). The state account allows no shared key and no public blob
+# access; only id-<slug>-octopus-config can read it.
 
 terraform {
   required_version = ">= 1.7.0"

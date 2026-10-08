@@ -274,12 +274,16 @@ $checks = [ordered] @{
     }
     'CAP-005' = {
         # After a failed deployment Git names the version that runs: step "Revert pin" runs only on failure and commits
-        # the previous tag back (test-failed-deployment.ps1 proves it with a release that cannot start).
+        # the previous tag back, and "Verify revert" right after it asks whether the app is in service
+        # (test-failed-deployment.ps1 proves both with a release that cannot start).
         $step = @(Get-ProcessStep $deployableProject | Where-Object Name -eq 'Revert pin')
         Assert-That ($step.Count -eq 1 -and $step[0].Condition -eq 'Failure') 'no Revert pin on failure'
         $names = @(Get-ProcessStep $deployableProject | ForEach-Object Name)
         Assert-That ($names.IndexOf('Revert pin') -gt $names.IndexOf('Update deployable')) 'Revert pin stands before Update deployable'
-        'Revert pin runs on failure, after Update deployable'
+        $verify = @(Get-ProcessStep $deployableProject | Where-Object Name -eq 'Verify revert')
+        Assert-That ($verify.Count -eq 1 -and $verify[0].Condition -eq 'Failure' -and $verify[0].StartTrigger -ne 'StartWithPrevious') 'no Verify revert that runs on failure and waits for the revert'
+        Assert-That ($names.IndexOf('Verify revert') -eq $names.IndexOf('Revert pin') + 1) 'Verify revert does not stand right after Revert pin'
+        'Revert pin runs on failure, after Update deployable, and Verify revert asks the app''s health after it'
     }
     'CAP-010' = { Assert-AppRepository; Assert-That ((Get-RequiredCheck $appRepo) -contains 'Build result') 'Build result not required'; 'Build result required on the app' }
     'CAP-011' = { $noisy = @(Get-NoisyDeployment); Assert-That ($noisy.Count -eq 0) "warnings in: $($noisy -join '; ')"; 'the current deployment of every project and environment logged no warning or error' }

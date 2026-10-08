@@ -8,7 +8,8 @@
 .DESCRIPTION
     Run by env-checks on every pull request and by the demo-environment skill before the first push. One PASS or FAIL
     line per rule; exits 1 when a rule fails. The rules: the names system.json may hold, who signs off
-    (octopus.approvers, octopus.operator), the cluster and SQL settings, and for every environment its Argo CD
+    (octopus.approvers, octopus.operator), the system's own GitHub App where it has one (github.app: identifiers
+    only), the cluster and SQL settings, and for every environment its Argo CD
     Applications and its folders under gitops/environments, with no folder for an environment system.json does not
     declare.
 
@@ -56,6 +57,20 @@ if ($system.octopus.ContainsKey('approvers')) {
 }
 if ($system.octopus.ContainsKey('operator')) {
     Test-Rule 'octopus.operator' ($system.octopus.operator -is [string] -and $system.octopus.operator -cmatch '^\S(?:.*\S)?$') 'the Octopus username of the operator identity, for example ai-ops'
+}
+
+# github.app (set-system-github-app.ps1 of the kit writes it): the system's own GitHub App, which the Octopus steps
+# and the workflows then act as in this repository. Identifiers only: the App's key is the repository secret
+# SYSTEM_APP_PRIVATE_KEY and never in this file. Without github.app the system uses the stored token (secret
+# OCTOPUS_GITHUB_TOKEN), as before the App existed.
+if ($system.ContainsKey('github')) {
+    $app = if ($system.github -is [Collections.IDictionary]) { $system.github['app'] } else { $null }
+    $valid = $app -is [Collections.IDictionary] -and
+        @($app.Keys | Where-Object { $_ -cnotin 'id', 'slug', 'clientId', 'installationId' }).Count -eq 0 -and
+        "$($app['id'])" -cmatch '^[1-9][0-9]*$' -and "$($app['installationId'])" -cmatch '^[1-9][0-9]*$' -and
+        $app['slug'] -is [string] -and $app['slug'] -cmatch '^[a-z0-9](?:[a-z0-9-]{0,32}[a-z0-9])?$' -and
+        $app['clientId'] -is [string] -and $app['clientId'] -cmatch '^[A-Za-z0-9._-]{8,40}$'
+    Test-Rule 'github.app' $valid 'the system''s own GitHub App: id and installationId (numbers), slug and clientId (texts) and nothing else; never a key'
 }
 
 $cluster = if ($system.ContainsKey('cluster')) { $system.cluster } else { @{} }
