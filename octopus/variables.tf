@@ -21,6 +21,9 @@ locals {
       { key = "${project}-database", project = id, name = "Database.Name", value = local.slug, environment = null },
       { key = "${project}-login", project = id, name = "Database.AppLogin", value = "app", environment = null },
       { key = "${project}-deployable", project = id, name = "Deployable.Name", value = project == "system" ? "" : project, environment = null },
+      # A site outside the cluster may exist in some environments only (deployables[].environments): elsewhere its
+      # project's steps say so and do nothing. Empty: every environment.
+      { key = "${project}-site-environments", project = id, name = "Site.Environments", value = jsonencode(try(local.deployables[project].environments, [])), environment = null },
     ]
   ])
 

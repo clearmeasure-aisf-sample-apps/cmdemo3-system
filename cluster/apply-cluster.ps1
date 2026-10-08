@@ -104,6 +104,19 @@ Write-Host "==> Cluster $clusterName (stack-$slug-cluster in $resourceGroup)"
 az stack group create --name "stack-$slug-cluster" --resource-group $resourceGroup `
     --template-file (Join-Path $Root 'infra' 'cluster.bicep') `
     --action-on-unmanage detachAll --deny-settings-mode none --yes --output none
+# A dashboard on Azure Static Web Apps that system.json no longer names (the deployable removed, or limited to fewer
+# environments, deployables[].environments): the stack only detaches what it no longer holds, so that a mistake in the
+# template deletes nothing, and a detached site would keep counting against the subscription's ten Free sites. This
+# one kind is deleted here, and only sites this system's template made: by the tags it gives them.
+$sitesWanted = @(foreach ($deployable in @($system.deployables | Where-Object { [string] $_['hosting'] -eq 'staticwebapp' })) {
+        $named = if ($deployable['environments']) { @($deployable.environments | ForEach-Object { [string] $_ }) } else { $environments }
+        foreach ($name in $named) { "swa-$slug-$name-$([string] $deployable.name)" }
+    })
+$sitesFound = @(az staticwebapp list --resource-group $resourceGroup --query "[?tags.system=='$slug' && tags.deployable!=null].name" --only-show-errors --output tsv | Where-Object { $_ })
+foreach ($site in @($sitesFound | Where-Object { $sitesWanted -notcontains $_ })) {
+    az staticwebapp delete --name $site --resource-group $resourceGroup --yes --only-show-errors --output none
+    Write-Host "PASS static site $site removed: system.json no longer names it"
+}
 $env:KUBECONFIG = Join-Path ([IO.Path]::GetTempPath()) "kubeconfig-$slug"
 # --only-show-errors: the CLI reports the merged context as a WARNING line.
 az aks get-credentials --resource-group $resourceGroup --name $clusterName --admin --overwrite-existing --file $env:KUBECONFIG --only-show-errors --output none

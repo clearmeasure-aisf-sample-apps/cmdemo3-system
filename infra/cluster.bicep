@@ -151,7 +151,9 @@ output oidcIssuer string = aks.properties.oidcIssuerProfile.issuerURL
 // westeurope, eastasia); the files are served from the platform's edge everywhere (system.staticLocation, centralus
 // unless set). any(): system.json has neither key until a system uses them (BCP053).
 var siteDeployables = filter(system.deployables, d => (any(d).?hosting ?? '') == 'staticwebapp')
-var sitePairs = flatten(map(siteDeployables, d => map(system.environments, e => { deployable: d.name, environment: e.name, tier: e.tier })))
+// deployables[].environments limits such a deployable to some environments (one site shows every environment, and the
+// Free plan allows ten sites a subscription); without the key it has a site in each.
+var sitePairs = flatten(map(siteDeployables, d => map(filter(system.environments, e => contains(any(d).?environments ?? map(system.environments, x => x.name), e.name)), e => { deployable: d.name, environment: e.name, tier: e.tier })))
 
 resource sites 'Microsoft.Web/staticSites@2024-04-01' = [
   for pair in sitePairs: {

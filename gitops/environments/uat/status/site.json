@@ -1,9 +1,0 @@
-{
-  "deployable": "status",
-  "environment": "uat",
-  "hosting": "staticwebapp",
-  "site": "swa-cmdemo3-uat-status",
-  "url": "https://jolly-mud-03d097c10.4.azurestaticapps.net",
-  "version": "1.0.8",
-  "generated": "2026-10-08T01:48:02Z"
-}

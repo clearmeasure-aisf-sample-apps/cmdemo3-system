@@ -79,7 +79,9 @@ Test-Rule 'deployables present' ($deployableNames.Count -gt 0)
 # replica, settings and secrets from a Key Vault). Here every deployable runs in every namespace from the templates of
 # gitops/, and no template reads these keys: a deployable that carried them would silently run without them.
 foreach ($deployable in @($system.deployables)) {
-    $unsupported = @('environments', 'alwaysOn', 'alwaysOnEnvironments', 'database', 'cpu', 'settings', 'environmentSettings', 'urlSetting', 'secrets' | Where-Object { $deployable.ContainsKey($_) })
+    # One exception: "environments" on a dashboard outside the cluster (hosting "staticwebapp") names the environments
+    # its site exists in, and infra/cluster.bicep and the site's steps read it (checked below).
+    $unsupported = @('environments', 'alwaysOn', 'alwaysOnEnvironments', 'database', 'cpu', 'settings', 'environmentSettings', 'urlSetting', 'secrets' | Where-Object { $deployable.ContainsKey($_) -and -not ($_ -eq 'environments' -and [string] $deployable['hosting'] -eq 'staticwebapp') })
     if ($unsupported.Count -gt 0) {
         Test-Rule "deployable $($deployable.name) keys" $false "$($unsupported -join ', ') are not supported by runtime aks-argocd (they belong to container-app deployables of runtime containerapps): remove them"
     }
@@ -106,6 +108,10 @@ foreach ($deployable in $system.deployables) {
     $name = [string] $deployable.name
     if ($deployable.ContainsKey('hosting')) {
         Test-Rule "deployable $name hosting" (@('staticsite', 'staticwebapp') -ccontains [string] $deployable.hosting) 'left out for an app, or "staticsite" or "staticwebapp"'
+    }
+    if ($deployable.ContainsKey('environments')) {
+        $listed = $deployable.environments
+        Test-Rule "deployable $name environments" ($siteNames -contains $name -and $listed -is [array] -and $listed.Count -gt 0 -and @($listed | Where-Object { $_ -isnot [string] -or @($system.environments | ForEach-Object { [string] $_.name }) -cnotcontains $_ }).Count -eq 0) 'only for hosting "staticwebapp": a list of environment names of system.json, the ones the site exists in (one site shows every environment)'
     }
     if ($siteNames -contains $name) {
         Test-Rule "deployable $name port" (-not $deployable.ContainsKey('port')) 'a site outside the cluster has no container: leave port out'
