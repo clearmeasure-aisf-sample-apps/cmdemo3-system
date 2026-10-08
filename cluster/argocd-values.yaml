@@ -8,8 +8,8 @@ configs:
   cm:
     accounts.octopus: apiKey
     accounts.octopus.enabled: "true"
-    # A person who watches the demo: read-only. An administrator sets its password
-    # (argocd account update-password --account viewer).
+    # A person who watches the demo: read-only. It has no password until one is set
+    # (set-argocd-viewer-password.ps1 of the kit).
     accounts.viewer: login
     # A commit of Octopus reaches the cluster within a minute.
     timeout.reconciliation: 60s
