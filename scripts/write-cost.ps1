@@ -52,6 +52,12 @@
     that day at all. Only Azure not answering fails the run (no sign-in, or no group answered), and then nothing is
     written, so a published file is never replaced by an empty one.
 
+    Nor by one that knows less: with -Published (the cost.json published now, as the workflow hands it over), a run
+    in which a query was refused or throttled to the end writes nothing when the published file is of the same day
+    or the day before and leaves fewer numbers null than this run would. The log says so with a SKIP line, the
+    published file stays, and the next hourly run reads again. A published file older than that is replaced all the
+    same: its numbers are too old to stand in for today's.
+
     Cost Management throttles (HTTP 429): a throttled query is tried again after the pause Azure names, or after
     20 s times the attempt (as the kit's get-fleet-limits.ps1), up to -Attempts times. A pause above
     -MaxWaitSeconds is not waited for.
@@ -73,7 +79,10 @@ param(
     # How often a throttled query is tried.
     [ValidateRange(1, 20)] [int] $Attempts = 5,
     # The longest pause that is waited for; Azure asking for more ends the query of that group.
-    [ValidateRange(1, 3600)] [int] $MaxWaitSeconds = 180
+    [ValidateRange(1, 3600)] [int] $MaxWaitSeconds = 180,
+    # The cost.json published now, if any: a run that could not read every query does not replace a file of the same
+    # day or the day before that knows more. A path without a file is the same as none.
+    [string] $Published = ''
 )
 
 Set-StrictMode -Version Latest
@@ -404,6 +413,33 @@ $document = [ordered] @{
 }
 
 $target = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
+
+# A run that Azure refused or throttled in part does not replace a recent file that knows more.
+$unread = @($groups.Keys | Where-Object { -not $read.Contains($_) }) + $planUnread
+if ($unread.Count -gt 0 -and $Published -and (Test-Path -LiteralPath $Published -PathType Leaf)) {
+    $before = $null
+    try { $before = Get-Content -LiteralPath $Published -Raw | ConvertFrom-Json -AsHashtable }
+    catch { Write-Host "The published cost.json could not be read as JSON ($($_.Exception.Message)): it does not count." }
+    if ($before -is [Collections.IDictionary] -and $before['asOf'] -and $before['system'] -is [Collections.IDictionary]) {
+        # How many of the three numbers of the system and of each entry a document leaves null.
+        $nulls = {
+            param($Of)
+            $count = 0
+            foreach ($part in @($Of['system']) + @($Of['environments'] | Where-Object { $_ })) {
+                foreach ($key in 'yesterday', 'last7Days', 'monthToDate') { if ($null -eq $part[$key]) { $count++ } }
+            }
+            $count
+        }
+        $recent = @((Format-Day $asOf), (Format-Day $asOf.AddDays(-1))) -contains [string] $before['asOf']
+        $beforeNulls = & $nulls $before
+        $nowNulls = & $nulls $document
+        if ($recent -and $beforeNulls -lt $nowNulls) {
+            Write-Skip "cost.json is not written: $($unread -join '; ') could not be read, which leaves $nowNulls numbers null; the published file as of $($before['asOf']) leaves $beforeNulls null and stays"
+            exit 0
+        }
+    }
+}
+
 [IO.File]::WriteAllText($target, "$($document | ConvertTo-Json -Depth 10)`n")
 $month = if ($null -ne $total.monthToDate) { "$(Format-Amount $total.monthToDate) $($document.currency) since $(Format-Day $monthStart)" } else { 'the month to date not known' }
 Write-Pass "$target`: $slug as of $(Format-Day $asOf): $month, $($entries.Count) entries ($(@($entries | ForEach-Object { $_.name }) -join ', ')), $($read.Count) of $($groups.Count) resource groups read, $unknown numbers not determined"

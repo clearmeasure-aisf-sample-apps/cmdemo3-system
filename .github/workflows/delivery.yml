@@ -67,12 +67,28 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
+      # The published cost.json, for write-cost.ps1 to compare with: a run that Azure throttled in part does not
+      # replace a file of the same day or the day before that knows more (the script's help).
+      - name: Fetch the published cost.json
+        if: steps.azure.outcome == 'success'
+        continue-on-error: true
+        env:
+          TARGET: ${{ runner.temp }}/cost.published.json
+        run: |
+          set -euo pipefail
+          if [ -n "$(git ls-remote --heads origin status)" ]; then
+            git fetch --quiet --depth=1 origin status
+            if git cat-file -e FETCH_HEAD:cost.json 2>/dev/null; then
+              git show FETCH_HEAD:cost.json > "$TARGET"
+            fi
+          fi
+
       - name: Write cost.json
         id: cost
         if: steps.azure.outcome == 'success'
         continue-on-error: true
         shell: pwsh
-        run: ./scripts/write-cost.ps1 -Path "${{ runner.temp }}/cost.json"
+        run: ./scripts/write-cost.ps1 -Path "${{ runner.temp }}/cost.json" -Published "${{ runner.temp }}/cost.published.json"
 
       # One commit without a parent, made from the files alone (no checkout of the branch), as github-actions[bot] with
       # the token the checkout step kept. Each file is the one this run wrote when its content differs from the
