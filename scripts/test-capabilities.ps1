@@ -18,6 +18,12 @@
     gitops/ says), Octopus (the Argo CD instance and its health, the deployments and their logs, the runbook runs),
     Azure (the cluster's stack, the registry, the role assignments) and the answers of the apps themselves.
 
+    The checks compare Git, Octopus and Azure at rest. The run first waits until no Octopus task runs (-WaitMinutes).
+    A deployment or runbook run that starts after that is noticed when a check fails: the run then asks Octopus once
+    whether a deployment or runbook run ran since the checks began, and if so waits for the space to be quiet again
+    (-AgainMinutes) and runs the failed checks once more. Only what fails then is a failure; the output names the
+    checks that ran again and the task that was the reason. FAIL lines come after the last check for that reason.
+
     Octopus: OCTOPUS_API_KEY when set (the operator), otherwise OCTOPUS_ACCESS_TOKEN (OctopusDeploy/login). GitHub: gh
     with GH_TOKEN or its own login. Azure: the current az login.
 #>
@@ -28,7 +34,10 @@ param(
     [switch] $ListChecks,
     # Only wait until no Octopus task runs, then stop (the workflow waits before it signs in to Azure; see capabilities.yml).
     [switch] $WaitOnly,
-    [int] $WaitMinutes = 90
+    [int] $WaitMinutes = 90,
+    # How long the failed checks wait for Octopus to become quiet again before they run once more (see the end of this
+    # file). Short: the workflow's sign-ins to Azure and Octopus last an hour.
+    [int] $AgainMinutes = 20
 )
 
 Set-StrictMode -Version Latest
@@ -726,29 +735,84 @@ if ($ListChecks) {
 }
 # Checks compare Git, Octopus and Azure; in the middle of a deployment or runbook run they differ by design, so the
 # run waits until the space is quiet.
-$deadline = [datetimeoffset]::UtcNow.AddMinutes($WaitMinutes)
-while (@((Invoke-Octopus "/api/$space/tasks?states=Executing,Queued,Cancelling&take=10").Items).Count -gt 0) {
-    if ([datetimeoffset]::UtcNow -gt $deadline) {
-        if ($WaitOnly) { Write-Host "Octopus is still busy after $WaitMinutes minutes; the checks wait on."; exit 0 }
-        Write-Fail "the space did not become quiet in $WaitMinutes minutes"
-        exit 1
+function Wait-QuietSpace([int] $Minutes) {
+    # $true once no task of the space runs or waits; $false when that takes longer than $Minutes. One read a minute.
+    $deadline = [datetimeoffset]::UtcNow.AddMinutes($Minutes)
+    while (@((Invoke-Octopus "/api/$space/tasks?states=Executing,Queued,Cancelling&take=10").Items).Count -gt 0) {
+        if ([datetimeoffset]::UtcNow -gt $deadline) { return $false }
+        Write-Host 'Waiting for running Octopus tasks to finish.'
+        Start-Sleep -Seconds 60
     }
-    Write-Host 'Waiting for running Octopus tasks to finish.'
-    Start-Sleep -Seconds 60
+    $true
+}
+function Get-TaskSince([datetimeoffset] $Since) {
+    # The deployments and runbook runs of the space that run now or ended after $Since, newest first: one read of the
+    # space's latest tasks.
+    @((Invoke-Octopus "/api/$space/tasks?take=50").Items | Where-Object {
+            $_.Name -in 'Deploy', 'RunbookRun' -and (-not $_.IsCompleted -or ($_.CompletedTime -and [datetimeoffset] $_.CompletedTime -ge $Since))
+        })
+}
+function Invoke-Check([string] $Id) {
+    # One check: Result PASS, SKIP or FAIL, and what it found.
+    try { @{ Id = $Id; Result = 'PASS'; Message = "$(& $checks[$Id])" } }
+    catch [CheckSkipped] { @{ Id = $Id; Result = 'SKIP'; Message = $_.Exception.Message } }
+    catch { @{ Id = $Id; Result = 'FAIL'; Message = $_.Exception.Message } }
+}
+function Write-Check([hashtable] $Check, [string] $Note = '') {
+    if ($Check.Result -eq 'FAIL') { Write-Fail "$($Check.Id): $($Check.Message)$Note" }
+    elseif ($Check.Result -eq 'SKIP') { Write-Host "SKIP $($Check.Id): $($Check.Message)$Note" }
+    else { Write-Pass "$($Check.Id): $($Check.Message)$Note" }
+}
+
+if (-not (Wait-QuietSpace $WaitMinutes)) {
+    if ($WaitOnly) { Write-Host "Octopus is still busy after $WaitMinutes minutes; the checks wait on."; exit 0 }
+    Write-Fail "the space did not become quiet in $WaitMinutes minutes"
+    exit 1
 }
 if ($WaitOnly) {
     Write-Host 'Octopus is quiet.'
     exit 0
 }
+# The checks begin here, with the space quiet. Ten seconds back: the clocks of this machine and of Octopus may differ.
+$began = [datetimeoffset]::UtcNow.AddSeconds(-10)
 # @(...) around the whole if: a single -Only ID would otherwise become a string, which has no Count in strict mode.
 $ids = @(if ($Only) { $Only } else { $checks.Keys })
 $failed = 0
 $skipped = 0
+# A failed check is not a FAIL line yet: a deployment or runbook run that started after the wait above makes Git,
+# Octopus and Azure differ while it runs (cmdemo2, 2026-10-07: a rollout applied prod during the nightly run, three
+# checks failed on its half-applied stack and an issue was opened for nothing). So the failures are judged after the
+# last check, with one read of the space's tasks.
+$unproven = @()
 foreach ($id in $ids) {
     if (-not $checks.Contains($id)) { Write-Fail "${id}: no check"; $failed++; continue }
-    try { Write-Pass "${id}: $(& $checks[$id])" }
-    catch [CheckSkipped] { Write-Host "SKIP ${id}: $($_.Exception.Message)"; $skipped++ }
-    catch { Write-Fail "${id}: $($_.Exception.Message)"; $failed++ }
+    $outcome = Invoke-Check $id
+    if ($outcome.Result -eq 'FAIL') { $unproven += $outcome; continue }
+    if ($outcome.Result -eq 'SKIP') { $skipped++ }
+    Write-Check $outcome
+}
+if ($unproven.Count -gt 0) {
+    $rerun = $false
+    try {
+        $ranSince = @(Get-TaskSince $began)
+        if ($ranSince.Count -gt 0) {
+            $ranNames = @($ranSince | Select-Object -First 3 | ForEach-Object { "$($_.Description) ($($_.Id), $($_.State))" }) -join '; '
+            $ranMore = if ($ranSince.Count -gt 3) { " and $($ranSince.Count - 3) more" } else { '' }
+            Write-Host "Octopus was not quiet while the checks ran: $ranNames$ranMore. In the middle of a deployment or runbook run Git, Octopus and Azure differ by design, so what failed runs once more when the space is quiet: $(@($unproven | ForEach-Object { $_.Id }) -join ', ')."
+            $rerun = Wait-QuietSpace $AgainMinutes
+            if (-not $rerun) { Write-Host "The space did not become quiet in $AgainMinutes minutes: the failed checks are not run again, and their first result stands." }
+        }
+    }
+    catch {
+        Write-Host "Octopus could not be asked whether a task ran while the checks ran, or whether it is quiet again ($($_.Exception.Message)): the failed checks are not run again, and their first result stands."
+        $rerun = $false
+    }
+    foreach ($firstResult in $unproven) {
+        $outcome = if ($rerun) { Invoke-Check $firstResult.Id } else { $firstResult }
+        if ($outcome.Result -eq 'FAIL') { $failed++ } elseif ($outcome.Result -eq 'SKIP') { $skipped++ }
+        $rerunNote = if (-not $rerun) { '' } elseif ($outcome.Result -eq 'FAIL') { ' (run again after Octopus became quiet: it still fails)' } else { " (run again after Octopus became quiet; during the task it failed with: $($firstResult.Message))" }
+        Write-Check $outcome $rerunNote
+    }
 }
 $skippedNote = if ($skipped -gt 0) { " ($skipped skipped: their preconditions do not exist yet)" } else { '' }
 if ($failed -gt 0) {

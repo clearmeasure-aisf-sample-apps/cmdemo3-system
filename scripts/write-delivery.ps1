@@ -23,6 +23,15 @@
       deploymentsLast7Days, failedLast7Days
                                         deployments that finished in the last seven days (Success, Failed, TimedOut;
                                         a cancelled one counts as neither), and those of them that failed
+    Per environment, health: what the hourly runbook "Health report" found (it asks every node of the environment and
+    its public address, and fails when one is not healthy):
+      last24Hours, last7Days            reports: its runs there that finished in that time (Success, Failed, TimedOut;
+                                        a cancelled one counts as neither); healthy: those of them that succeeded
+      lastFailure                       when the last run that did not succeed finished; null when none did in seven
+                                        days
+    These are hourly checks by the pipeline, not continuous monitoring: an outage between two runs is not counted.
+    One call per environment (the runbook's own runs there, finished in the last seven days); null when the system has
+    no such runbook or the runs cannot be read.
     failover: the last successful run of runbook "Failover test" whose log reports a measurement: the environment,
     when it finished, and the seconds until the public address answered from the standby.
 
@@ -214,11 +223,52 @@ function Get-Behind($History, $FirstRuns, $Runs) {
     $behind
 }
 
+$runbooks = $null
+function Get-Runbook([string] $Name) {
+    # A runbook of the system project by its name; $null when the project has none of that name. The project's
+    # runbooks are read once (two calls), for the failover test and the health report alike.
+    if ($null -eq $script:runbooks) {
+        $project = Invoke-Octopus "/api/$space/projects/$slug-system"
+        $script:runbooks = @(Get-OctopusItem "/api/$space/projects/$($project.Id)/runbooks")
+    }
+    @($script:runbooks | Where-Object { $_.Name -eq $Name }) | Select-Object -First 1
+}
+
+function Get-Health([string] $EnvironmentId) {
+    # What the hourly "Health report" found in one environment (octopus/runbooks.tf: the runbook asks every node and
+    # the public address, and fails when one is not healthy): its runs that finished in the last 24 hours and in the
+    # last seven days, how many of them succeeded, and when the last one failed. $null when the system has no such
+    # runbook. The runbook's own runs in that environment are asked for (tasks?name=RunbookRun&runbook=&environment=),
+    # as CAP-076 learnt: the first page of all runbook runs holds a day and a half. One call: an hourly runbook makes
+    # 168 runs in seven days, and a page holds 400; a second page only when people also ran it by hand that often.
+    $runbook = Get-Runbook 'Health report'
+    if (-not $runbook) { return $null }
+    $since = [uri]::EscapeDataString((Format-Moment $now.AddDays(-7)))
+    $tasks = [Collections.Generic.List[object]]::new()
+    do {
+        # Into a variable first: a JSON array goes down a pipeline as one object.
+        $page = Invoke-Octopus "/api/$space/tasks?name=RunbookRun&runbook=$($runbook.Id)&environment=$EnvironmentId&fromCompletedDate=$since&skip=$($tasks.Count)&take=400"
+        $items = @($page.Items)
+        foreach ($item in $items) { $tasks.Add($item) }
+    } while ($items.Count -eq 400 -and $tasks.Count -lt 1200)
+    $finished = @(foreach ($task in $tasks) {
+            $at = ConvertTo-Moment (Get-Field $task 'CompletedTime')
+            if ($null -eq $at -or [string] $task.State -notin 'Success', 'Failed', 'TimedOut' -or $at -le $now.AddDays(-7)) { continue }
+            [pscustomobject] @{ At = $at; Healthy = [string] $task.State -eq 'Success' }
+        })
+    $day = @($finished | Where-Object { $_.At -gt $now.AddHours(-24) })
+    $failed = @($finished | Where-Object { -not $_.Healthy } | Sort-Object At -Descending)
+    [ordered] @{
+        last24Hours = [ordered] @{ reports = $day.Count; healthy = @($day | Where-Object { $_.Healthy }).Count }
+        last7Days   = [ordered] @{ reports = $finished.Count; healthy = @($finished | Where-Object { $_.Healthy }).Count }
+        lastFailure = if ($failed.Count -gt 0) { Format-Moment $failed[0].At } else { $null }
+    }
+}
+
 function Get-Failover {
     # As CAP-047 reads it: test-failover.ps1 logs "Failover of <deployable> in <environment>: <address> answered from
     # the standby (<region>) <n> s after <app> stopped". The runbook's own successful runs, newest first.
-    $project = Invoke-Octopus "/api/$space/projects/$slug-system"
-    $runbook = @(Get-OctopusItem "/api/$space/projects/$($project.Id)/runbooks" | Where-Object { $_.Name -eq 'Failover test' }) | Select-Object -First 1
+    $runbook = Get-Runbook 'Failover test'
     if (-not $runbook) { return $null }
     $runs = @((Invoke-Octopus "/api/$space/tasks?name=RunbookRun&runbook=$($runbook.Id)&states=Success&take=10").Items)
     foreach ($run in $runs) {
@@ -247,7 +297,11 @@ foreach ($deployable in $system.deployables) {
 $projects['system'] = @{ Project = "$slug-system"; Repository = "$org/$($system.system.repository)"; IsSystem = $true }
 try {
     $environmentName = @{}
-    foreach ($entry in @(Get-OctopusItem "/api/$space/environments")) { $environmentName[[string] $entry.Id] = [string] $entry.Name }
+    $environmentId = @{}
+    foreach ($entry in @(Get-OctopusItem "/api/$space/environments")) {
+        $environmentName[[string] $entry.Id] = [string] $entry.Name
+        $environmentId[[string] $entry.Name] = [string] $entry.Id
+    }
     $deadline = [datetimeoffset]::UtcNow.AddMinutes($WaitMinutes)
     while ($WaitMinutes -gt 0 -and [datetimeoffset]::UtcNow -lt $deadline -and
         @((Invoke-Octopus "/api/$space/tasks?name=Deploy&states=Executing,Queued,Cancelling&take=100").Items | Where-Object { -not $_.HasPendingInterruptions }).Count -gt 0) {
@@ -315,9 +369,21 @@ $document = [ordered] @{
                         $fact.behindFirst = Get-Behind $history @(Get-Success $history $first) $successes
                         $fact
                     })
+                health      = $null
             }
         })
     failover     = $null
+}
+# The hourly health reports, per environment: optional like every fact, so a read that fails leaves null.
+$reported = 0
+foreach ($entry in $document.environments) {
+    try {
+        if (-not $environmentId.ContainsKey($entry.name)) { throw "Octopus has no environment $($entry.name)" }
+        $entry.health = Get-Health $environmentId[$entry.name]
+        if ($entry.health) { $reported++ }
+        else { $unknown++; Write-Skip "health of $($entry.name): $slug-system has no runbook 'Health report'" }
+    }
+    catch { $unknown++; Write-Skip "health of $($entry.name): not read: $($_.Exception.Message)" }
 }
 try { $document.failover = Get-Failover }
 catch { $unknown++; Write-Skip "failover: not read: $($_.Exception.Message)" }
@@ -325,4 +391,4 @@ catch { $unknown++; Write-Skip "failover: not read: $($_.Exception.Message)" }
 $target = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
 [IO.File]::WriteAllText($target, "$($document | ConvertTo-Json -Depth 10)`n")
 $failover = if ($document.failover) { "failover in $($document.failover.environment) at $($document.failover.at)" } else { 'no failover measured' }
-Write-Pass "$target`: $deployed of $($environments.Count * $projects.Count) deployments ($($environments.Count) environments, $($projects.Count) deployables), $failover, $unknown facts not determined"
+Write-Pass "$target`: $deployed of $($environments.Count * $projects.Count) deployments ($($environments.Count) environments, $($projects.Count) deployables), hourly health reports of $reported environment(s), $failover, $unknown facts not determined"
