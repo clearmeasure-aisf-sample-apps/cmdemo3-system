@@ -113,9 +113,20 @@ $sitesWanted = @(foreach ($deployable in @($system.deployables | Where-Object { 
         foreach ($name in $named) { "swa-$slug-$name-$([string] $deployable.name)" }
     })
 $sitesFound = @(az staticwebapp list --resource-group $resourceGroup --query "[?tags.system=='$slug' && tags.deployable!=null].name" --only-show-errors --output tsv | Where-Object { $_ })
-foreach ($site in @($sitesFound | Where-Object { $sitesWanted -notcontains $_ })) {
-    az staticwebapp delete --name $site --resource-group $resourceGroup --yes --only-show-errors --output none
-    Write-Host "PASS static site $site removed: system.json no longer names it"
+$sitesStale = @($sitesFound | Where-Object { $sitesWanted -notcontains $_ })
+foreach ($site in $sitesStale) {
+    # --no-wait: waiting reads Microsoft.Web/locations/staticSitesOperationStatuses at the subscription, and this
+    # identity's roles are on the system's resource groups. The group's own list says when the site is gone.
+    az staticwebapp delete --name $site --resource-group $resourceGroup --yes --no-wait --only-show-errors --output none
+}
+if ($sitesStale.Count -gt 0) {
+    $deadline = (Get-Date).AddMinutes(5)
+    do {
+        Start-Sleep -Seconds 10
+        $sitesLeft = @(az staticwebapp list --resource-group $resourceGroup --query '[].name' --only-show-errors --output tsv | Where-Object { $sitesStale -contains $_ })
+    } while ($sitesLeft.Count -gt 0 -and (Get-Date) -lt $deadline)
+    if ($sitesLeft.Count -gt 0) { throw "FAIL static site(s) $($sitesLeft -join ', ') still exist five minutes after their deletion was asked for" }
+    foreach ($site in $sitesStale) { Write-Host "PASS static site $site removed: system.json no longer names it" }
 }
 $env:KUBECONFIG = Join-Path ([IO.Path]::GetTempPath()) "kubeconfig-$slug"
 # --only-show-errors: the CLI reports the merged context as a WARNING line.
