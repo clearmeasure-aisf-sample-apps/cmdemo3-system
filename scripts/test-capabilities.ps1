@@ -739,21 +739,38 @@ if ($ListChecks) {
 }
 # Checks compare Git, Octopus and Azure; in the middle of a deployment or runbook run they differ by design, so the
 # run waits until the space is quiet.
+function Test-WaitsForPerson($Task) {
+    # A task Octopus paused with an interruption. On this runtime that has two meanings: the sign-off, which a person
+    # answers (type ManualIntervention), and the wait for Argo CD to sync, which Octopus answers itself (type
+    # ArgoCDApplicationSync). Only the first is a task at rest, so the task's own flag does not decide: the type of
+    # its pending interruption does.
+    if (-not $Task.HasPendingInterruptions) { return $false }
+    @((Invoke-Octopus "/api/$space/interruptions?regarding=$($Task.Id)&take=100").Items | Where-Object { $_.IsPending -and $_.Type -eq 'ManualIntervention' }).Count -gt 0
+}
 function Wait-QuietSpace([int] $Minutes) {
-    # $true once no task of the space runs or waits; $false when that takes longer than $Minutes. One read a minute.
+    # $true once no task of the space runs or waits for Octopus; $false when that takes longer than $Minutes. One read
+    # a minute. A task that waits for a person (a deployment at its sign-off) is at rest: nothing changes until
+    # somebody answers, which can take a night, and what the environment runs meanwhile is what the checks read.
     $deadline = [datetimeoffset]::UtcNow.AddMinutes($Minutes)
-    while (@((Invoke-Octopus "/api/$space/tasks?states=Executing,Queued,Cancelling&take=10").Items).Count -gt 0) {
+    $said = $false
+    while ($true) {
+        $tasks = @((Invoke-Octopus "/api/$space/tasks?states=Executing,Queued,Cancelling&take=10").Items)
+        $atSignOff = @($tasks | Where-Object { Test-WaitsForPerson $_ })
+        if ($atSignOff.Count -gt 0 -and -not $said) {
+            $said = $true
+            Write-Host "At rest, waiting for a person: $(@($atSignOff | ForEach-Object { "$($_.Description) ($($_.Id))" }) -join '; ')."
+        }
+        if ($tasks.Count -eq $atSignOff.Count) { return $true }
         if ([datetimeoffset]::UtcNow -gt $deadline) { return $false }
         Write-Host 'Waiting for running Octopus tasks to finish.'
         Start-Sleep -Seconds 60
     }
-    $true
 }
 function Get-TaskSince([datetimeoffset] $Since) {
     # The deployments and runbook runs of the space that run now or ended after $Since, newest first: one read of the
-    # space's latest tasks.
+    # space's latest tasks. One that waits for a person changes nothing meanwhile (Wait-QuietSpace) and does not count.
     @((Invoke-Octopus "/api/$space/tasks?take=50").Items | Where-Object {
-            $_.Name -in 'Deploy', 'RunbookRun' -and (-not $_.IsCompleted -or ($_.CompletedTime -and [datetimeoffset] $_.CompletedTime -ge $Since))
+            $_.Name -in 'Deploy', 'RunbookRun' -and ((-not $_.IsCompleted -and -not (Test-WaitsForPerson $_)) -or ($_.CompletedTime -and [datetimeoffset] $_.CompletedTime -ge $Since))
         })
 }
 function Invoke-Check([string] $Id) {
