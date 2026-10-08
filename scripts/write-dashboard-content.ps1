@@ -222,13 +222,16 @@ function ConvertTo-ClusterTopology {
         })
     return [ordered] @{
         system       = [ordered] @{
-            slug        = $slug
-            name        = [string] $System.system['name']
-            repository  = if ($repository) { "https://github.com/$repository" } else { $null }
+            slug           = $slug
+            name           = [string] $System.system['name']
+            repository     = if ($repository) { "https://github.com/$repository" } else { $null }
             # The delivery facts: workflow delivery of the system repository publishes them to its branch "status".
-            deliveryUrl = if ($repository) { "https://raw.githubusercontent.com/$repository/status/delivery.json" } else { $null }
+            deliveryUrl    = if ($repository) { "https://raw.githubusercontent.com/$repository/status/delivery.json" } else { $null }
             # What each environment cost: the same workflow publishes it next to the delivery facts.
-            costUrl     = if ($repository) { "https://raw.githubusercontent.com/$repository/status/cost.json" } else { $null }
+            costUrl        = if ($repository) { "https://raw.githubusercontent.com/$repository/status/cost.json" } else { $null }
+            # The deployments in flight: workflow deployments of the system repository publishes them to its branch
+            # "deployments" (queued, executing, waiting for a sign-off, ended in the last half hour).
+            deploymentsUrl = if ($repository) { "https://raw.githubusercontent.com/$repository/deployments/deployments.json" } else { $null }
         }
         generated    = $Generated.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ', [Globalization.CultureInfo]::InvariantCulture)
         # The cluster view: the live status the collector in the cluster serves (nodes, pods, their CPU and memory),

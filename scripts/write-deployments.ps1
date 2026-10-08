@@ -17,7 +17,9 @@
       release      the release
       state        queued     waiting behind another task of the environment or the instance's task limit
                    executing  running now
-                   waiting    stopped for a person: the sign-off, or a question of a guided failure
+                   waiting    stopped for a person: the sign-off, or a question of a guided failure (a pending
+                              interruption of type ManualIntervention; a pause Octopus answers itself, such
+                              as the wait for Argo CD to sync, is executing)
                    succeeded, failed, canceled   ended, at "finished"
       since        when it started, or when it was queued while it has not started (UTC)
       finished     when it ended (UTC); absent while it has not
@@ -27,7 +29,7 @@
     that nothing is being deployed.
 
     One request to Octopus: the newest deployment tasks of the space, which carry project, release and environment in
-    their description.
+    their description. One more for each task that is paused, to see for whom.
 
     Run by workflow deployments of the system repository when Octopus pins a version (the start of every
     deployment), every five minutes, and on demand; published on branch "deployments" and read from the browser at
@@ -121,6 +123,17 @@ function Format-Utc {
     return $time.ToString('yyyy-MM-ddTHH:mm:ssZ', [cultureinfo]::InvariantCulture)
 }
 
+function Test-WaitsForPerson {
+    # A task Octopus paused with an interruption waits for a person only when a pending one is a manual intervention
+    # (the sign-off, a question of a guided failure). Octopus pauses a task for itself too: on runtime aks-argocd it
+    # waits that way for Argo CD to sync (type ArgoCDApplicationSync, in the records of cmdemo3's space), and answers
+    # it itself. The task's own flag is the same for both, so the type of the pending interruption decides. One more
+    # request, and only for a task that is paused.
+    param([Parameter(Mandatory)] [object] $Task)
+    if (-not $Task.HasPendingInterruptions) { return $false }
+    return @((Invoke-Octopus "/api/$Space/interruptions?regarding=$($Task.Id)&take=100").Items | Where-Object { $_ -and $_.IsPending -and $_.Type -eq 'ManualIntervention' }).Count -gt 0
+}
+
 function Get-DeploymentState {
     # What a task's state means for someone who looks at the wall.
     param([Parameter(Mandatory)] [object] $Task)
@@ -132,7 +145,7 @@ function Get-DeploymentState {
         'Canceled' { return 'canceled' }
         default {
             # Executing or Cancelling. Stopped for a person is its own state: somebody has to act.
-            if ($Task.HasPendingInterruptions) { return 'waiting' }
+            if (Test-WaitsForPerson -Task $Task) { return 'waiting' }
             return 'executing'
         }
     }

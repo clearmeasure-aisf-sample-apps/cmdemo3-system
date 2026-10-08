@@ -74,6 +74,14 @@ function Invoke-Octopus([string] $Path) {
     $headers = if ($env:OCTOPUS_API_KEY) { @{ 'X-Octopus-ApiKey' = $env:OCTOPUS_API_KEY } } else { @{ Authorization = "Bearer $env:OCTOPUS_ACCESS_TOKEN" } }
     Invoke-RestMethod -Uri "$octopusUrl$Path" -Headers $headers
 }
+function Test-WaitsForPerson($Task) {
+    # A deployment Octopus paused at its sign-off, which a person answers: at rest, and it can stay so for a night.
+    # The task's own flag does not decide: on runtime aks-argocd Octopus also pauses a deployment while Argo CD syncs
+    # (interruption type ArgoCDApplicationSync, which Octopus answers itself), and that one is changing the
+    # environment. Only a pending interruption of type ManualIntervention is a wait for a person.
+    if (-not $Task.HasPendingInterruptions) { return $false }
+    @((Invoke-Octopus "/api/$space/interruptions?regarding=$($Task.Id)&take=100").Items | Where-Object { $_.IsPending -and $_.Type -eq 'ManualIntervention' }).Count -gt 0
+}
 function Get-OctopusItem([string] $Path, [int] $Most = 2000) {
     # Every item of a paged collection, in Octopus's order (newest first), up to $Most.
     $separator = if ($Path.Contains('?')) { '&' } else { '?' }
@@ -304,7 +312,7 @@ try {
     }
     $deadline = [datetimeoffset]::UtcNow.AddMinutes($WaitMinutes)
     while ($WaitMinutes -gt 0 -and [datetimeoffset]::UtcNow -lt $deadline -and
-        @((Invoke-Octopus "/api/$space/tasks?name=Deploy&states=Executing,Queued,Cancelling&take=100").Items | Where-Object { -not $_.HasPendingInterruptions }).Count -gt 0) {
+        @((Invoke-Octopus "/api/$space/tasks?name=Deploy&states=Executing,Queued,Cancelling&take=100").Items | Where-Object { -not (Test-WaitsForPerson $_) }).Count -gt 0) {
         Write-Host 'Waiting for running deployments to finish.'
         Start-Sleep -Seconds 30
     }
