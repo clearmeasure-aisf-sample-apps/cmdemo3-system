@@ -187,5 +187,13 @@
   },
   "sql": {
     "edition": "Express"
+  },
+  "github": {
+    "app": {
+      "id": 5243493,
+      "slug": "cmdemo3-system",
+      "clientId": "Iv23liXbhtqpBN6ClY79",
+      "installationId": 169407209
+    }
   }
 }
