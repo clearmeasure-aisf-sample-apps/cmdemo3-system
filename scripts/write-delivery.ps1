@@ -15,6 +15,11 @@
       version, deployedAt, releaseUrl   the release of the last successful deployment and when it finished
       signedOffBy, reason               who answered that deployment's "Sign-off" with Proceed, and the note they gave
                                         (null in the first environment, which has no sign-off)
+      lastPersonSignOff                 the newest successful deployment there whose "Sign-off" a person answered with
+                                        Proceed: version, by, at (when they answered), reason and releaseUrl. A person
+                                        is an Octopus user that is not a service account; automation signs off as
+                                        one. null when no person did among the project's newest hundred answers to
+                                        interruptions, and in the first environment
       commit, commitAt, leadTimeHours   the commit the release was built from (the 40-character SHA in its release
                                         notes, as the release workflows write them; else its build information), when
                                         it was committed (GitHub), and deployedAt minus commitAt
@@ -66,6 +71,8 @@ $space = [string] $system.octopus.spaceId
 $octopusUrl = ([string] $system.octopus.url).TrimEnd('/')
 $environments = @($system.environments | ForEach-Object { [string] $_.name })
 $first = $environments[0]
+# The people who may sign off (Octopus usernames or email addresses), when system.json names any.
+$approvers = @($system.octopus['approvers'] | Where-Object { $_ } | ForEach-Object { [string] $_ })
 
 function Write-Pass { param([string] $Message) Write-Host "PASS $Message" }
 function Write-Fail { param([string] $Message) Write-Host "FAIL $Message" }
@@ -137,20 +144,26 @@ function Get-DeploymentHistory([string] $Project) {
             DeploymentId = [string] $deployment.Id
         }
     }
-    @{ Releases = $releases; Runs = @($runs) }
+    @{ ProjectId = [string] $found.Id; Releases = $releases; Runs = @($runs) }
 }
 function Get-Success($History, [string] $Environment) {
     # The successful deployments to an environment, newest first.
     @($History.Runs | Where-Object { $_.Environment -eq $Environment -and $_.State -eq 'Success' -and $null -ne $_.Finished } | Sort-Object Finished -Descending)
 }
 
+$userOf = @{}
+function Read-User([string] $UserId) {
+    # An Octopus user, read once; throws when this identity may not read users.
+    if (-not $userOf.ContainsKey($UserId)) { $userOf[$UserId] = Invoke-Octopus "/api/users/$UserId" }
+    $userOf[$UserId]
+}
 $userName = @{}
 function Get-UserName([string] $UserId, [string] $DeploymentId) {
     # The user's name; when this identity may not read users, the name the audit trail gives for the answer.
     if (-not $UserId) { return $null }
     if (-not $userName.ContainsKey($UserId)) {
         $name = $null
-        try { $name = [string] (Invoke-Octopus "/api/users/$UserId").Username }
+        try { $name = [string] (Read-User $UserId).Username }
         catch {
             try {
                 $answer = @((Invoke-Octopus "/api/$space/events?regarding=$DeploymentId&take=100").Items | Where-Object { $_.Message -like 'Submitted interruption*' }) | Select-Object -First 1
@@ -163,8 +176,15 @@ function Get-UserName([string] $UserId, [string] $DeploymentId) {
     }
     $userName[$UserId]
 }
+$signOffOf = @{}
 function Get-SignOff($Run) {
-    # The answered manual intervention "Sign-off" of the deployment (octopus/projects.tf): who proceeded, and their note.
+    # The answered manual intervention "Sign-off" of the deployment (octopus/projects.tf): who proceeded, and their
+    # note. Read once per deployment: the last sign-off by a person may be that of the deployment the card shows.
+    if ($signOffOf.ContainsKey($Run.TaskId)) { return $signOffOf[$Run.TaskId] }
+    $signOffOf[$Run.TaskId] = Read-SignOff $Run
+    $signOffOf[$Run.TaskId]
+}
+function Read-SignOff($Run) {
     $answered = @((Invoke-Octopus "/api/$space/interruptions?regarding=$($Run.TaskId)&take=100").Items |
             Where-Object { $_.Type -eq 'ManualIntervention' -and $_.Title -eq 'Sign-off' -and -not $_.IsPending -and (Get-Field $_.Form.Values 'Result') -eq 'Proceed' } |
             Sort-Object { ConvertTo-Moment $_.Created } -Descending)
@@ -172,8 +192,58 @@ function Get-SignOff($Run) {
     $notes = [string] (Get-Field $answered[0].Form.Values 'Notes')
     @{
         By     = Get-UserName ([string] (Get-Field $answered[0] 'ResponsibleUserId')) $Run.DeploymentId
+        UserId = [string] (Get-Field $answered[0] 'ResponsibleUserId')
         Reason = if ($notes) { $notes } else { $null }
     }
+}
+
+$person = @{}
+function Test-Person([string] $UserId, [string] $Username) {
+    # Whether an answer came from a person: an Octopus user that is not a service account (automation signs off as
+    # one: the operator). When this identity may not read users, a person is who system.json names by username in
+    # octopus.approvers, and anybody else counts as automation.
+    if (-not $UserId) { return $false }
+    if (-not $person.ContainsKey($UserId)) {
+        try { $person[$UserId] = (Get-Field (Read-User $UserId) 'IsService') -eq $false }
+        catch { $person[$UserId] = [bool] $Username -and $approvers -contains $Username }
+    }
+    $person[$UserId]
+}
+$answersOf = @{}
+function Get-SignOffAnswer([string] $ProjectId) {
+    # The answers to the manual intervention "Sign-off" of a project's deployments as the audit trail has them, newest
+    # first: who answered (UserId, Username), when (Occurred) and the documents the event names (the deployment, its
+    # environment). One call per project: its newest hundred events about interruptions, about fifty sign-offs.
+    if (-not $answersOf.ContainsKey($ProjectId)) {
+        $page = Invoke-Octopus "/api/$space/events?projects=$ProjectId&documentTypes=Interruptions&take=100"
+        $answersOf[$ProjectId] = @(@($page.Items) | Where-Object { [string] (Get-Field $_ 'Message') -like 'Submitted interruption Sign-off*' })
+    }
+    $answersOf[$ProjectId]
+}
+function Get-PersonSignOff($Project, [string] $Environment) {
+    # The newest successful deployment to an environment whose "Sign-off" a person answered with Proceed, or $null.
+    # The card shows the newest deployment, which automation usually signed off; the last one a person signed is
+    # otherwise visible only in Octopus's history. The audit trail says who answered what and when; the interruption
+    # of that deployment confirms the answer (Proceed, by that user) and holds the note.
+    $history = $Project.History
+    foreach ($answer in @(Get-SignOffAnswer $history.ProjectId)) {
+        $documents = @(Get-Field $answer 'RelatedDocumentIds')
+        if ($documents -notcontains $environmentId[$Environment]) { continue }
+        $userId = [string] (Get-Field $answer 'UserId')
+        if (-not (Test-Person $userId ([string] (Get-Field $answer 'Username')))) { continue }
+        $run = @($history.Runs | Where-Object { $_.Environment -eq $Environment -and $_.State -eq 'Success' -and $documents -contains $_.DeploymentId }) | Select-Object -First 1
+        if (-not $run) { continue }
+        $signOff = Get-SignOff $run
+        if (-not $signOff -or $signOff.UserId -ne $userId) { continue }
+        return [ordered] @{
+            version    = $run.Version
+            by         = [string] (Get-Field $answer 'Username')
+            at         = Format-Moment (ConvertTo-Moment (Get-Field $answer 'Occurred'))
+            reason     = $signOff.Reason
+            releaseUrl = "$octopusUrl/app#/$space/projects/$($Project.Project)/deployments/releases/$($run.Version)"
+        }
+    }
+    $null
 }
 
 function Get-Commit($Release, [bool] $IsSystem) {
@@ -339,6 +409,7 @@ $document = [ordered] @{
                         $history = $project.History
                         $fact = [ordered] @{
                             name = $name; version = $null; deployedAt = $null; signedOffBy = $null; reason = $null
+                            lastPersonSignOff = $null
                             commit = $null; commitAt = $null; leadTimeHours = $null
                             behindFirst = [ordered] @{ versions = $null; days = $null }
                             deploymentsLast7Days = $null; failedLast7Days = $null; releaseUrl = $null
@@ -362,6 +433,10 @@ $document = [ordered] @{
                             if ($signOff) { $fact.signedOffBy = $signOff.By; $fact.reason = $signOff.Reason }
                         }
                         catch { $unknown++; Write-Skip "$($project.Project) $($current.Version) in ${environment}: sign-off not read: $($_.Exception.Message)" }
+                        if ($environment -ne $first) {
+                            try { $fact.lastPersonSignOff = Get-PersonSignOff $project $environment }
+                            catch { $unknown++; Write-Skip "$($project.Project) in ${environment}: the last sign-off by a person not read: $($_.Exception.Message)" }
+                        }
 
                         $fact.commit = Get-Commit $current.Release $project.IsSystem
                         if (-not $fact.commit) { $unknown++; Write-Skip "$($project.Project) $($current.Version): its release names no commit" }
