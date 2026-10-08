@@ -290,7 +290,7 @@ resource "octopusdeploy_process_step" "content" {
   container      = local.container
 
   execution_properties = merge(local.script_properties, {
-    "Octopus.Action.Script.ScriptBody" = file("${path.module}/../scripts/write-dashboard-content.ps1")
+    "Octopus.Action.Script.ScriptBody" = join("\n", [local.github_token_functions, file("${path.module}/../scripts/write-dashboard-content.ps1")])
   })
 }
 
@@ -323,7 +323,7 @@ resource "octopusdeploy_process_step" "upload_site" {
 
   execution_properties = merge(local.script_properties, {
     "Octopus.Action.Azure.AccountId"   = "#{Azure.Account}"
-    "Octopus.Action.Script.ScriptBody" = file("${path.module}/../scripts/write-dashboard-content.ps1")
+    "Octopus.Action.Script.ScriptBody" = join("\n", [local.github_token_functions, file("${path.module}/../scripts/write-dashboard-content.ps1")])
   })
 }
 
@@ -337,13 +337,13 @@ resource "octopusdeploy_process_step" "verify_site" {
   container      = local.container
 
   execution_properties = merge(local.script_properties, {
-    "Octopus.Action.Script.ScriptBody" = file("${path.module}/../scripts/verify-site.ps1")
+    "Octopus.Action.Script.ScriptBody" = join("\n", [local.github_token_functions, file("${path.module}/../scripts/verify-site.ps1")])
   })
 }
 
 # Runs only when an earlier step failed: names why the new version cannot start and commits the previous tag back
 # (scripts/revert-pin.ps1). It stands before the test steps, so failed acceptance tests fail the deployment, which
-# blocks its promotion, but leave the version that runs pinned.
+# blocks its promotion, but leave the version that runs pinned. "Verify revert" follows it.
 resource "octopusdeploy_process_step" "revert_pin" {
   for_each = local.cluster_deployables
 
@@ -355,7 +355,29 @@ resource "octopusdeploy_process_step" "revert_pin" {
   container      = local.container
 
   execution_properties = merge(local.script_properties, {
-    "Octopus.Action.Script.ScriptBody" = file("${path.module}/../scripts/revert-pin.ps1")
+    "Octopus.Action.Script.ScriptBody" = join("\n", [local.github_token_functions, file("${path.module}/../scripts/revert-pin.ps1")])
+  })
+}
+
+# Right after "Revert pin", and like it only when an earlier step failed: asks whether the deployable is in service
+# after the revert, at its public address (scripts/verify-revert.ps1). "Revert pin" waits for the previous tag's
+# replicas; nothing else asks the application's health once a deployment has failed, and a rollback nobody verifies
+# can leave an environment down while the deployment reads as rolled back (the kit's decision 0018, which asks for a
+# step after the rollback whose slug starts with "verify-", that waits for it and runs when the deployment has
+# failed). Octopus makes the slug from the name: "Verify revert" is verify-revert, as in the other runtime. The step
+# reads the cluster and the public address only, so it receives no GitHub credential (github.tf, token_steps).
+resource "octopusdeploy_process_step" "verify_revert" {
+  for_each = local.cluster_deployables
+
+  process_id     = octopusdeploy_process.deployable[each.key].id
+  name           = "Verify revert"
+  type           = "Octopus.Script"
+  condition      = "Failure"
+  worker_pool_id = local.cluster_worker_pool_id
+  container      = local.container
+
+  execution_properties = merge(local.script_properties, {
+    "Octopus.Action.Script.ScriptBody" = file("${path.module}/../scripts/verify-revert.ps1")
   })
 }
 
@@ -474,6 +496,7 @@ resource "octopusdeploy_process_steps_order" "deployable" {
     [
       octopusdeploy_process_step.verify[each.key].id,
       octopusdeploy_process_step.revert_pin[each.key].id,
+      octopusdeploy_process_step.verify_revert[each.key].id,
     ],
     contains(keys(local.tested_deployables), each.key) ? [
       octopusdeploy_process_step.open_test_database[each.key].id,

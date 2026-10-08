@@ -12,8 +12,11 @@
 # removing it starts the cluster again on the next run.
 # On the very first push this run is what creates the Octopus projects, the cluster and the first environment.
 # Credentials: GitHub OIDC only. Azure as id-<slug>-octopus-config (Terraform state) and id-<slug>-cluster (the
-# cluster), Octopus as the system's service account (OctopusDeploy/login). The one stored secret is
-# OCTOPUS_GITHUB_TOKEN, handed to Octopus as the Git credential of its Argo CD steps.
+# cluster), Octopus as the system's service account (OctopusDeploy/login). The stored secrets are the GitHub
+# credentials Octopus commits to this repository with: OCTOPUS_GITHUB_TOKEN, a user's token, as the Git credential of
+# its Argo CD steps (a stored password, which a GitHub App cannot give) and, in a system without a GitHub App of its
+# own, of its script steps; SYSTEM_APP_PRIVATE_KEY, the key of the system's own App, for the script steps of a system
+# whose system.json names one (github.app). A secret that is not stored reaches Terraform empty.
 name: system
 
 on:
@@ -65,6 +68,7 @@ jobs:
         shell: pwsh
         env:
           TF_VAR_github_token: ${{ secrets.OCTOPUS_GITHUB_TOKEN }}
+          TF_VAR_github_app_private_key: ${{ secrets.SYSTEM_APP_PRIVATE_KEY }}
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
