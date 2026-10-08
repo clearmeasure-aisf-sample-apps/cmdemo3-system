@@ -42,7 +42,9 @@
     CPU and memory that the environment's namespace requests of what all running pods request now (the mean of the
     two), read from the cluster's own status file (https://<slug>-cluster.<cluster.domain>/cluster.json). It is
     today's share applied to the days read, not a bill; the amounts stay part of "shared". Without that file (a
-    stopped cluster, a system without a dashboard) there is no estimate, with a SKIP line.
+    stopped cluster, a system without a dashboard) there is no estimate, with a SKIP line. A published file
+    without the estimate is not complete once the status file answers again (the cluster woke): with -EveryHours,
+    the first hourly run after that reads Azure and writes the estimate, whatever the hour.
 
     Azure's cost data arrives hours late and is amended for a day or two: the numbers are what Azure reports now.
     A number that cannot be determined is null, with a SKIP line that says why: a resource group whose query was
@@ -194,9 +196,26 @@ if ($Published -and (Test-Path -LiteralPath $Published -PathType Leaf)) {
     if ($before -isnot [Collections.IDictionary] -or -not $before['asOf'] -or $before['system'] -isnot [Collections.IDictionary]) { $before = $null }
 }
 
+# Runtime aks-argocd: the cluster's own status file, which the estimate of each environment's part is read from. Asked
+# once a run; $null when it does not answer (a stopped cluster, a system without a dashboard).
+$statusUrl = if ($clusterGroups.Count -gt 0) { "https://$slug-cluster.$([string] $system.cluster['domain'])/cluster.json" } else { '' }
+$status = $null
+$statusError = ''
+if ($statusUrl -and $system.cluster['dormant']) { $statusError = 'the cluster is dormant, cluster.dormant in system.json' }
+elseif ($statusUrl) {
+    try { $status = Invoke-RestMethod -Uri $statusUrl -TimeoutSec 30 }
+    catch { $statusError = (("$($_.Exception.Message)" -split '\r?\n')[0]).Trim() }
+}
+# A published file without the estimate was written while the status file did not answer. Once it answers, that file
+# is not complete: a check that waits for the estimate after a wake would wait up to -EveryHours hours for it.
+$estimateDue = $false
+if ($status -and $before) {
+    $estimateDue = @($before['environments'] | Where-Object { $_ -is [Collections.IDictionary] -and $_['estimate'] }).Count -eq 0
+}
+
 # Cost changes by the day and Cost Management throttles its readers: a complete file of the last complete day is
 # read again only in this system's hours.
-if ($EveryHours -gt 1 -and $before -and [string] $before['asOf'] -eq (Format-Day $asOf) -and (& $nulls $before) -eq 0) {
+if ($EveryHours -gt 1 -and $before -and -not $estimateDue -and [string] $before['asOf'] -eq (Format-Day $asOf) -and (& $nulls $before) -eq 0) {
     $offset = 0
     foreach ($character in $slug.ToCharArray()) { $offset += [int] $character }
     $offset = $offset % $EveryHours
@@ -395,10 +414,8 @@ $entries = @(foreach ($name in @($environments) + $others + $shared) {
     })
 # Runtime aks-argocd: each environment's part of the cluster, by what its namespace requests (see the help).
 if ($clusterGroups.Count -gt 0) {
-    $statusUrl = "https://$slug-cluster.$([string] $system.cluster['domain'])/cluster.json"
     $shares = @{}
-    try {
-        $status = Invoke-RestMethod -Uri $statusUrl -TimeoutSec 30
+    if ($status) {
         $running = @($status.namespaces | ForEach-Object { $space = [string] $_.name; $_.pods | Where-Object { $_ -and $_.phase -notin 'Succeeded', 'Failed' } | ForEach-Object { [pscustomobject] @{ Space = $space; Cpu = [double] $_.cpu.requests; Memory = [double] $_.memory.requests } } })
         $allCpu = ($running | Measure-Object -Property Cpu -Sum).Sum
         $allMemory = ($running | Measure-Object -Property Memory -Sum).Sum
@@ -410,8 +427,8 @@ if ($clusterGroups.Count -gt 0) {
         }
         else { Write-Skip "$statusUrl lists no pod that requests CPU and memory: no estimate of each environment's part of the cluster" }
     }
-    catch {
-        Write-Skip "$statusUrl did not answer ($((("$($_.Exception.Message)" -split '\r?\n')[0]).Trim())): no estimate of each environment's part of the cluster"
+    else {
+        Write-Skip "$statusUrl did not answer ($statusError): no estimate of each environment's part of the cluster"
     }
     if ($shares.Count -gt 0) {
         # What the cluster costs and no environment's tag claims: the rows of its two groups without the tag.
