@@ -33,10 +33,11 @@
     their description. One more for each task that is paused, to see for whom.
 
     Run by workflow deployments of the system repository when Octopus pins a version (the start of every
-    deployment), every five minutes, and on demand; published on branch "deployments" and read from the browser at
+    deployment), on a five-minute schedule, and on demand, and again every half minute while a deployment is
+    executing; published on branch "deployments" and read from the browser at
     https://raw.githubusercontent.com/<org>/<repository>/deployments/deployments.json, which GitHub may serve a few
-    minutes old. A started deployment shows within about one to six minutes; one that is only queued, within ten to
-    fifteen.
+    minutes old. A started deployment shows within about one to six minutes, and its end as soon; one that is only
+    queued shows at the next scheduled run, which GitHub starts when it has room (up to half an hour).
 
     Octopus: OCTOPUS_API_KEY when set (the operator), otherwise OCTOPUS_ACCESS_TOKEN (OctopusDeploy/login).
 
