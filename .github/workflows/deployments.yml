@@ -5,7 +5,8 @@
 # from the browser at https://raw.githubusercontent.com/<org>/<repository>/deployments/deployments.json (the
 # repository is public): the system's own health dashboard marks the node that is being deployed, the fleet health
 # dashboard the system's box.
-# It runs when Octopus pins a version (every deployment commits environments/<env>/versions.json as it starts), every
+# It runs when Octopus pins a version (every deployment commits environments/<env>/versions.json as it starts; on
+# runtime aks-argocd, a file under gitops/environments), every
 # five minutes, and on demand. GitHub starts a schedule late when it is busy and serves the file a few minutes old: a
 # started deployment shows within about one to six minutes, one that is only queued within ten to fifteen.
 # Credentials: GitHub OIDC to Octopus as the system's service account (environment "capabilities", read-only use),
@@ -17,6 +18,8 @@ on:
     branches: [main]
     paths:
       - "environments/**/versions.json"
+      # Runtime aks-argocd pins there (this file is shared with it); the default runtime has no such folder.
+      - "gitops/environments/**"
   schedule:
     - cron: "*/5 * * * *"
   workflow_dispatch:
