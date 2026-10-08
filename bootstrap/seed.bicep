@@ -55,6 +55,13 @@ param frontDoor bool = false
 @description('True once a deployable takes secrets the operator supplies (system.json deployables[].secrets): the identity that applies this seed then gets a role on the two tier groups that may set a secret in the environments\' vaults and list secret names, but not read a value (the skill\'s set-demo-secret.ps1).')
 param operatorSecretWriter bool = false
 
+@description('With azure.appEnvironment "system": the resource group of the system\'s one Container Apps environment (cae-<slug>), which every environment of both tiers runs its apps in. Empty: each environment owns its Container Apps environment.')
+param appsResourceGroupName string = ''
+
+@description('With azure.appEnvironment "system": the kind of that environment. standard: workload profiles (Consumption). express: Azure Container Apps express, which has a quota of its own and no custom domains.')
+@allowed(['standard', 'express'])
+param appEnvironmentMode string = 'standard'
+
 @description('ServicePrincipal when the operator identity applies the seed; User for a person\'s login.')
 @allowed(['ServicePrincipal', 'User'])
 param operatorPrincipalType string = 'ServicePrincipal'
@@ -72,6 +79,7 @@ var allTags = union(tags, { system: slug, purpose: 'demo' })
 var hasCluster = !empty(clusterResourceGroupName)
 // The cluster of runtime aks-argocd pulls its images from the registry, whatever containerRegistry says.
 var hasRegistry = containerRegistry || hasCluster
+var hasSystemAppEnvironment = !empty(appsResourceGroupName)
 var systemSubjectPrefix = githubSubjectPrefixes[?systemRepository] ?? 'repo:${githubOrg}/${systemRepository}'
 
 resource nonprodGroup 'Microsoft.Resources/resourceGroups@2024-03-01' = {
@@ -91,6 +99,51 @@ resource clusterGroup 'Microsoft.Resources/resourceGroups@2024-03-01' = if (hasC
   name: hasCluster ? clusterResourceGroupName : 'unused'
   location: location
   tags: union(allTags, { tier: 'cluster' })
+}
+
+// azure.appEnvironment "system": the group of the one Container Apps environment both tiers run their apps in.
+resource appsGroup 'Microsoft.Resources/resourceGroups@2024-03-01' = if (hasSystemAppEnvironment) {
+  name: hasSystemAppEnvironment ? appsResourceGroupName : 'unused'
+  location: location
+  tags: union(allTags, { tier: 'shared' })
+}
+
+// Placing a container app in an environment takes Microsoft.App/managedEnvironments/join/action on it, which only broad
+// roles (Contributor) hold: this role holds that and read, assignable to the apps group only.
+resource environmentUserRole 'Microsoft.Authorization/roleDefinitions@2022-04-01' = if (hasSystemAppEnvironment) {
+  name: guid(subscription().id, slug, 'container-apps-environment-user')
+  properties: {
+    roleName: 'Container Apps environment user (${slug})'
+    description: 'Read the system Container Apps environment of ${slug} and place container apps in it: the deploy identities of both tiers.'
+    type: 'CustomRole'
+    permissions: [
+      {
+        actions: [
+          'Microsoft.App/managedEnvironments/read'
+          'Microsoft.App/managedEnvironments/join/action'
+        ]
+        notActions: []
+      }
+    ]
+    assignableScopes: [appsGroup.id]
+  }
+}
+
+module apps 'modules/seed-apps.bicep' = if (hasSystemAppEnvironment) {
+  name: 'seed-${slug}-apps'
+  scope: appsGroup
+  params: {
+    slug: slug
+    location: location
+    tags: union(allTags, { tier: 'shared' })
+    deployPrincipalIds: [
+      nonprod.outputs.deploy.principalId
+      prod.outputs.deploy.principalId
+    ]
+    planPrincipalId: nonprod.outputs.plan.principalId
+    environmentUserRoleName: environmentUserRole!.name
+    express: appEnvironmentMode == 'express'
+  }
 }
 
 resource edgeGroup 'Microsoft.Resources/resourceGroups@2024-03-01' = if (frontDoor) {
@@ -349,8 +402,11 @@ output resourceGroups object = union(
     nonprod: nonprodGroup.name
     prod: prodGroup.name
   },
-  hasCluster ? { cluster: clusterGroup!.name } : {}
+  hasCluster ? { cluster: clusterGroup!.name } : {},
+  hasSystemAppEnvironment ? { apps: appsGroup!.name } : {}
 )
+// azure.appEnvironment "system": the system's Container Apps environment (system.json azure.appEnvironment); {} otherwise.
+output appEnvironment object = hasSystemAppEnvironment ? apps!.outputs.appEnvironment : {}
 output registry object = nonprod.outputs.registry
 output terraformState object = nonprod.outputs.terraformState
 output frontDoor object = frontDoor ? edge!.outputs.frontDoor : {}
