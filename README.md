@@ -65,6 +65,7 @@ Run `pwsh -NoProfile -File scripts/write-gitops.ps1` and commit what it writes; 
 
 ## Argo CD web UI
 
-`https://argocd-<slug>.<cluster.domain>`. The account `viewer` is read-only; an administrator sets its password once
-(`argocd account update-password --account viewer`). The administrator's first password is in the cluster, in Secret
+`https://argocd-<slug>.<cluster.domain>`. The account `viewer` is read-only and has no password until one is set:
+`set-argocd-viewer-password.ps1` of the kit makes one, sets it as the administrator through Argo CD's API, proves
+that `viewer` reads and cannot sync, and puts it into the keyring of the person's login (never on the screen). The administrator's first password is in the cluster, in Secret
 `argocd-initial-admin-secret` of namespace `argocd`.
