@@ -1,9 +1,0 @@
-{
-  "deployable": "status",
-  "environment": "tdd",
-  "hosting": "staticwebapp",
-  "site": "swa-cmdemo3-tdd-status",
-  "url": "https://red-cliff-0de3bc510.5.azurestaticapps.net",
-  "version": "1.0.8",
-  "generated": "2026-10-08T01:42:20Z"
-}

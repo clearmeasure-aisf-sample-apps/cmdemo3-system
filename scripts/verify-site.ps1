@@ -25,6 +25,13 @@ $environmentName = [string] $OctopusParameters['Octopus.Environment.Name']
 $repository = [string] $OctopusParameters['System.Repository']
 $name = [string] $OctopusParameters['Deployable.Name']
 $release = [string] $OctopusParameters['Octopus.Release.Number']
+# The site may exist in some environments only (system.json deployables[].environments): elsewhere there is nothing
+# to verify, and the release passes through.
+$siteEnvironments = @(if ($OctopusParameters['Site.Environments']) { ([string] $OctopusParameters['Site.Environments']) | ConvertFrom-Json })
+if ($siteEnvironments.Count -gt 0 -and $siteEnvironments -notcontains $environmentName) {
+    Write-Highlight "$name has no site in $environmentName (its site exists in $($siteEnvironments -join ', ')): nothing to verify."
+    return
+}
 $path = "gitops/environments/$environmentName/$name/site.json"
 $headers = @{
     Authorization          = "Bearer $([string] $OctopusParameters['GitHub.Token'])"

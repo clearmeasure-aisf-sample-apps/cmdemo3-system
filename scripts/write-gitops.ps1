@@ -798,4 +798,19 @@ spec:
     }
 }
 
+# A site outside the cluster records its address where its deployment put it (gitops/environments/<env>/<name>/
+# site.json). In an environment the deployable no longer names (deployables[].environments) the record is stale: the
+# site is removed there, and nothing may read its address any more.
+foreach ($site in $sites) {
+    $named = if ($site['environments']) { @($site.environments | ForEach-Object { [string] $_ }) } else { $environments }
+    foreach ($environment in @($environments | Where-Object { $named -notcontains $_ })) {
+        $record = Join-Path $Root 'gitops' 'environments' $environment ([string] $site.name) 'site.json'
+        if (Test-Path -LiteralPath $record) {
+            Remove-Item -LiteralPath $record
+            $folder = Split-Path -Parent $record
+            if (-not @(Get-ChildItem -LiteralPath $folder -Force)) { Remove-Item -LiteralPath $folder }
+        }
+    }
+}
+
 Write-Host "PASS gitops/ written for $($environments -join ', ') and $(@($deployables | ForEach-Object { $_.name }) -join ', ')"

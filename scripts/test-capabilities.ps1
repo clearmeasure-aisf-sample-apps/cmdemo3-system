@@ -525,7 +525,9 @@ $checks = [ordered] @{
             $dashboardName = [string] $dashboard.name
             # A site outside the cluster answers while the cluster sleeps; one inside it does not.
             if ([string] $dashboard.hosting -eq 'staticsite' -and $dormant) { continue }
-            foreach ($e in $environments) {
+            # A site outside the cluster may exist in some environments only (deployables[].environments).
+            $homes = if ($dashboard['environments']) { @($dashboard.environments | ForEach-Object { [string] $_ }) } else { $environments }
+            foreach ($e in $homes) {
                 if (-not (Find-LastDeployment "$slug-$dashboardName" $e)) { continue }
                 $url = Get-DeployableUrl $dashboardName $e
                 $topology = Get-Text (Invoke-WebRequest -Uri "$url/topology.json" -TimeoutSec 120) | ConvertFrom-Json -AsHashtable
@@ -617,16 +619,18 @@ $checks = [ordered] @{
         "delivery facts on branch status: $(@($compared).Count) deployment(s) match Octopus"
     }
     'CAP-079' = {
-        # Each deployed process says what it was built from: every app with a buildPath answers it, from any origin,
+        # Each deployed process says what it was built from: every deployable with a buildPath (an app, a dashboard) answers it, from any origin,
         # in every environment that runs a release of it, with that release's version, the commit and the count of
         # its lines of code. The quality sections (tests, coverage, complexity, CRAP, analysis) may be null: the
         # Build run's artifacts expire.
-        $described = @($apps | Where-Object { $_['buildPath'] })
-        if ($described.Count -eq 0) { Skip-Check 'no app has a buildPath in system.json' }
+        $described = @($system.deployables | Where-Object { $_['buildPath'] })
+        if ($described.Count -eq 0) { Skip-Check 'no deployable has a buildPath in system.json' }
         Assert-Awake
         $origin = 'https://capability-check.example'
         $shown = foreach ($app in $described) {
-            foreach ($e in $environments) {
+            # A dashboard outside the cluster may exist in some environments only (deployables[].environments).
+            $homes = if ($app['environments']) { @($app.environments | ForEach-Object { [string] $_ }) } else { $environments }
+            foreach ($e in $homes) {
                 $deployment = Find-LastDeployment "$slug-$($app.name)" $e
                 if (-not $deployment) { continue }
                 $url = "$(Get-DeployableUrl ([string] $app.name) $e)$($app.buildPath)"

@@ -196,7 +196,8 @@ function ConvertTo-ClusterTopology {
                         telemetryPath = $null
                         # An empty list: the traffic button leaves the dashboards alone.
                         trafficPaths  = @()
-                        buildPath     = $null
+                        # Where the site describes its build (the dashboard's Build writes build-facts.json).
+                        buildPath     = if ($dashboard['buildPath']) { [string] $dashboard.buildPath } else { $null }
                         # In the cluster the pin is the image tag in Git; outside it there is no file of that form.
                         pinUrl        = if ($inCluster -and $repository) { "https://raw.githubusercontent.com/$repository/$pinPath" } else { $null }
                         pinHistoryUrl = if ($inCluster -and $repository) { "https://github.com/$repository/commits/$pinPath" } else { $null }
@@ -407,9 +408,12 @@ function ConvertTo-ClusterDiagram {
     # A dashboard outside the cluster: a Static Web App of the same resource group, which answers without the cluster.
     foreach ($site in $sites) {
         $alias = "swa_$(Get-DeployableAlias $site.name)"
-        $siteName = "swa-$slug-$Environment-$($site.name)"
+        # A site that exists in some environments only shows every environment: it is drawn in each diagram, as the
+        # site it is (the one of the first environment it names).
+        $siteEnvironment = if ($site['environments'] -and @($site.environments | ForEach-Object { [string] $_ }) -notcontains $Environment) { [string] @($site.environments)[0] } else { $Environment }
+        $siteName = "swa-$slug-$siteEnvironment-$($site.name)"
         $lines.Add("    Container($alias, $(Get-Quoted $siteName), $(Get-Quoted "Azure Static Web App: $($site.name)"), $(Get-Quoted $smallTileSlot))")
-        $address = if ($DashboardUrl["$Environment/$($site.name)"]) { [string] $DashboardUrl["$Environment/$($site.name)"] } else { $null }
+        $address = if ($DashboardUrl["$siteEnvironment/$($site.name)"]) { [string] $DashboardUrl["$siteEnvironment/$($site.name)"] } else { $null }
         $nodes.Add([ordered] @{ alias = $alias; qualifiedName = "sub.rg_cluster.$alias"; kind = 'staticsite'; deployable = [string] $site.name; name = $siteName; url = $address })
     }
     $lines.Add('  }')
@@ -426,7 +430,8 @@ function ConvertTo-ClusterDiagram {
     }
     foreach ($static in @($statics) + @($sites)) {
         # The label is a link to that dashboard, where its address is known.
-        Add-Edge 'browser' "swa_$(Get-DeployableAlias $static.name)" 'dashboard' 'loads the dashboard' 'HTTPS' $false ([string] $DashboardUrl["$Environment/$($static.name)"])
+        $shownIn = if ($static['environments'] -and @($static.environments | ForEach-Object { [string] $_ }) -notcontains $Environment) { [string] @($static.environments)[0] } else { $Environment }
+        Add-Edge 'browser' "swa_$(Get-DeployableAlias $static.name)" 'dashboard' 'loads the dashboard' 'HTTPS' $false ([string] $DashboardUrl["$shownIn/$($static.name)"])
     }
     $lines.AddRange($edgeLines)
     $lines.Add('@enduml')
@@ -618,6 +623,12 @@ $system = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(($file.con
 $entry = @($system.deployables | Where-Object { [string] $_.name -eq $name -and [string] $_['hosting'] -in 'staticsite', 'staticwebapp' }) | Select-Object -First 1
 if (-not $entry) { Fail-Step "system.json on main has no dashboard named ${name} (deployables[].hosting `"staticsite`" or `"staticwebapp`")." }
 $outside = [string] $entry.hosting -eq 'staticwebapp'
+# A site outside the cluster may exist in some environments only (deployables[].environments: one site shows every
+# environment). In the others the release passes through: nothing to upload.
+if ($outside -and $entry['environments'] -and @($entry.environments | ForEach-Object { [string] $_ }) -notcontains $environmentName) {
+    Write-Highlight "$name has no site in $environmentName (its site exists in $(@($entry.environments) -join ', ')): nothing to deploy here."
+    return
+}
 $siteFile = "gitops/environments/$environmentName/$name/site.json"
 if ($outside) {
     # Before anything is rendered: the release's files, the tools of the upload and the site itself.
@@ -660,7 +671,8 @@ else {
 $dashboardUrls = @{}
 foreach ($other in @($system.deployables | Where-Object { [string] $_['hosting'] -in 'staticsite', 'staticwebapp' })) {
     $otherName = [string] $other.name
-    foreach ($otherEnvironment in @($system.environments | ForEach-Object { [string] $_.name })) {
+    $otherNamed = if ($other['environments']) { @($other.environments | ForEach-Object { [string] $_ }) } else { @($system.environments | ForEach-Object { [string] $_.name }) }
+    foreach ($otherEnvironment in $otherNamed) {
         $key = "$otherEnvironment/$otherName"
         if ($otherName -eq $name -and $otherEnvironment -eq $environmentName) { $dashboardUrls[$key] = $url }
         elseif ([string] $other.hosting -eq 'staticsite') { $dashboardUrls[$key] = "https://$slug-$otherEnvironment-$otherName.$domain" }

@@ -136,13 +136,18 @@
       "repository": "cmdemo3-dashboard",
       "hosting": "staticsite",
       "port": 8080,
-      "healthPath": "/"
+      "healthPath": "/",
+      "buildPath": "/build-facts.json"
     },
     {
       "name": "status",
       "repository": "cmdemo3-status",
       "hosting": "staticwebapp",
-      "healthPath": "/"
+      "healthPath": "/",
+      "buildPath": "/build-facts.json",
+      "environments": [
+        "prod"
+      ]
     }
   ],
   "environments": [
