@@ -88,7 +88,9 @@ jobs:
         if: steps.azure.outcome == 'success'
         continue-on-error: true
         shell: pwsh
-        run: ./scripts/write-cost.ps1 -Path "${{ runner.temp }}/cost.json" -Published "${{ runner.temp }}/cost.published.json"
+        # The hourly runs ask Azure every six hours while the published file is complete and of the last complete day
+        # (the script's help says which hours); a run on demand always asks.
+        run: ./scripts/write-cost.ps1 -Path "${{ runner.temp }}/cost.json" -Published "${{ runner.temp }}/cost.published.json" -EveryHours ${{ github.event_name == 'schedule' && 6 || 1 }}
 
       # One commit without a parent, made from the files alone (no checkout of the branch), as github-actions[bot] with
       # the token the checkout step kept. Each file is the one this run wrote when its content differs from the

@@ -58,6 +58,14 @@
     published file stays, and the next hourly run reads again. A published file older than that is replaced all the
     same: its numbers are too old to stand in for today's.
 
+    How often Azure is asked: -EveryHours (1: every run, the default). The workflow's hourly runs pass 6. A run then
+    asks nothing while the published file (-Published) is of the last complete day and leaves no number null, except
+    in the hours of the day that are this system's: the UTC hours h with h mod EveryHours equal to the sum of the
+    slug's characters mod EveryHours, so the systems of one subscription do not all ask in the same hour. Such a run
+    writes nothing, with a SKIP line, and the published file stays. A file of an earlier day, a file with a null
+    number (the day's cost not there yet, a throttled read) and a run on demand are read at once, so a new day
+    appears with the first hourly run that finds it and what Azure amends later within six hours.
+
     Cost Management throttles (HTTP 429): a throttled query is tried again after the pause Azure names, or after
     20 s times the attempt (as the kit's get-fleet-limits.ps1), up to -Attempts times. A pause above
     -MaxWaitSeconds is not waited for.
@@ -82,7 +90,10 @@ param(
     [ValidateRange(1, 3600)] [int] $MaxWaitSeconds = 180,
     # The cost.json published now, if any: a run that could not read every query does not replace a file of the same
     # day or the day before that knows more. A path without a file is the same as none.
-    [string] $Published = ''
+    [string] $Published = '',
+    # Azure is asked every run (1) or, while the published file is complete and of the last complete day, only in
+    # this system's hours of the day: every this many hours.
+    [ValidateRange(1, 24)] [int] $EveryHours = 1
 )
 
 Set-StrictMode -Version Latest
@@ -165,6 +176,36 @@ $weekKey = & $dayKey $weekStart
 $monthKey = & $dayKey $monthStart
 
 $retry = @{ Attempts = $Attempts; MaxWaitSeconds = $MaxWaitSeconds }
+
+# How many of the three numbers of the system and of each entry a cost document leaves null.
+$nulls = {
+    param($Of)
+    $count = 0
+    foreach ($part in @($Of['system']) + @($Of['environments'] | Where-Object { $_ })) {
+        foreach ($key in 'yesterday', 'last7Days', 'monthToDate') { if ($null -eq $part[$key]) { $count++ } }
+    }
+    $count
+}
+# The published file, when there is one that reads as a cost document.
+$before = $null
+if ($Published -and (Test-Path -LiteralPath $Published -PathType Leaf)) {
+    try { $before = Get-Content -LiteralPath $Published -Raw | ConvertFrom-Json -AsHashtable }
+    catch { Write-Host "The published cost.json could not be read as JSON ($($_.Exception.Message)): it does not count." }
+    if ($before -isnot [Collections.IDictionary] -or -not $before['asOf'] -or $before['system'] -isnot [Collections.IDictionary]) { $before = $null }
+}
+
+# Cost changes by the day and Cost Management throttles its readers: a complete file of the last complete day is
+# read again only in this system's hours.
+if ($EveryHours -gt 1 -and $before -and [string] $before['asOf'] -eq (Format-Day $asOf) -and (& $nulls $before) -eq 0) {
+    $offset = 0
+    foreach ($character in $slug.ToCharArray()) { $offset += [int] $character }
+    $offset = $offset % $EveryHours
+    if ($now.Hour % $EveryHours -ne $offset) {
+        $hours = @(0..23 | Where-Object { $_ % $EveryHours -eq $offset } | ForEach-Object { '{0:00}' -f $_ }) -join ', '
+        Write-Skip "cost.json is not written: the published file is as of $($before['asOf']) and complete, and Azure is asked again at $hours UTC (every $EveryHours hours; now it is $($now.ToString('HH:mm', [cultureinfo]::InvariantCulture)) UTC)"
+        exit 0
+    }
+}
 function Invoke-CostQuery([string] $Uri, [string] $BodyPath) {
     # The kit's cost query (get-fleet-limits.ps1): az rest, and the one known transient, 429, tried again after a
     # pause (principle 004). Azure names the pause in its answer ("retry after N seconds") or not at all.
@@ -416,27 +457,13 @@ $target = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPat
 
 # A run that Azure refused or throttled in part does not replace a recent file that knows more.
 $unread = @($groups.Keys | Where-Object { -not $read.Contains($_) }) + $planUnread
-if ($unread.Count -gt 0 -and $Published -and (Test-Path -LiteralPath $Published -PathType Leaf)) {
-    $before = $null
-    try { $before = Get-Content -LiteralPath $Published -Raw | ConvertFrom-Json -AsHashtable }
-    catch { Write-Host "The published cost.json could not be read as JSON ($($_.Exception.Message)): it does not count." }
-    if ($before -is [Collections.IDictionary] -and $before['asOf'] -and $before['system'] -is [Collections.IDictionary]) {
-        # How many of the three numbers of the system and of each entry a document leaves null.
-        $nulls = {
-            param($Of)
-            $count = 0
-            foreach ($part in @($Of['system']) + @($Of['environments'] | Where-Object { $_ })) {
-                foreach ($key in 'yesterday', 'last7Days', 'monthToDate') { if ($null -eq $part[$key]) { $count++ } }
-            }
-            $count
-        }
-        $recent = @((Format-Day $asOf), (Format-Day $asOf.AddDays(-1))) -contains [string] $before['asOf']
-        $beforeNulls = & $nulls $before
-        $nowNulls = & $nulls $document
-        if ($recent -and $beforeNulls -lt $nowNulls) {
-            Write-Skip "cost.json is not written: $($unread -join '; ') could not be read, which leaves $nowNulls numbers null; the published file as of $($before['asOf']) leaves $beforeNulls null and stays"
-            exit 0
-        }
+if ($unread.Count -gt 0 -and $before) {
+    $recent = @((Format-Day $asOf), (Format-Day $asOf.AddDays(-1))) -contains [string] $before['asOf']
+    $beforeNulls = & $nulls $before
+    $nowNulls = & $nulls $document
+    if ($recent -and $beforeNulls -lt $nowNulls) {
+        Write-Skip "cost.json is not written: $($unread -join '; ') could not be read, which leaves $nowNulls numbers null; the published file as of $($before['asOf']) leaves $beforeNulls null and stays"
+        exit 0
     }
 }
 
