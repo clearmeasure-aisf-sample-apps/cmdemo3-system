@@ -730,6 +730,33 @@ $checks = [ordered] @{
         }
         "cost as of $($cost['asOf']): $($cost['currency']) $($cost.system['monthToDate']) this month for $($named -join ', ')$(if ($estimated.Count -gt 0) { "; an estimated part of the cluster for $($estimated -join ', ')" })"
     }
+    'CAP-088' = {
+        # Deployments in flight where a browser can read them: workflow deployments publishes deployments.json on
+        # branch deployments (one commit, none on main) when a deployment pins its version and every five minutes,
+        # and only when something changed, so the file's own time says nothing about its age. It is compared with
+        # Octopus both ways instead, with half an hour for a schedule GitHub starts late: every deployment task of
+        # the space that has been in flight that long is in the file, and nothing the file calls in flight ended
+        # that long ago.
+        $branches = @(gh api "repos/$systemRepo/branches" --paginate --jq '.[].name')
+        if ($branches -notcontains 'deployments') { Skip-Check 'workflow deployments has not published branch deployments yet' }
+        $published = Get-RepoFile $systemRepo 'deployments.json?ref=deployments' | ConvertFrom-Json -AsHashtable
+        Assert-That ([string] $published['system'] -eq $slug) "deployments.json on branch deployments is of system '$($published['system'])', not $slug"
+        $listed = @($published['deployments'] | Where-Object { $_ })
+        $states = 'queued', 'executing', 'waiting', 'succeeded', 'failed', 'canceled'
+        $unreadable = @($listed | Where-Object { $states -notcontains [string] $_['state'] -or -not $_['project'] -or -not $_['environment'] -or [string] $_['url'] -notmatch '/tasks/ServerTasks-\d+$' })
+        Assert-That ($unreadable.Count -eq 0) "deployments.json has $($unreadable.Count) entr(ies) without a project, an environment, a task or one of the states $($states -join ', ')"
+        $inFlight = @($listed | Where-Object { -not $_['finished'] })
+        $limit = [datetimeoffset]::UtcNow.AddMinutes(-30)
+        foreach ($task in @((Invoke-Octopus "/api/$space/tasks?name=Deploy&states=Queued,Executing,Cancelling&take=100").Items | Where-Object { $_ })) {
+            if ([datetimeoffset] $task.QueueTime -gt $limit) { continue }
+            Assert-That (@($inFlight | Where-Object { [string] $_['url'] -like "*/tasks/$($task.Id)" }).Count -eq 1) "deployments.json does not list '$($task.Description)', in flight in Octopus for over half an hour ($($task.Id)): run workflow deployments"
+        }
+        foreach ($entry in $inFlight) {
+            $task = Invoke-Octopus "/api/tasks/$(([string] $entry['url']) -replace '^.*/tasks/', '')"
+            Assert-That (-not $task.IsCompleted -or [datetimeoffset] $task.CompletedTime -gt $limit) "deployments.json calls $($entry['project']) $($entry['release']) to $($entry['environment']) $($entry['state']); in Octopus it ended over half an hour ago ($($task.Id)): run workflow deployments"
+        }
+        "deployments.json on branch deployments: $($inFlight.Count) in flight, as in Octopus; $($listed.Count - $inFlight.Count) ended in the last half hour"
+    }
 }
 
 

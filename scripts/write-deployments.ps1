@@ -18,8 +18,9 @@
       state        queued     waiting behind another task of the environment or the instance's task limit
                    executing  running now
                    waiting    stopped for a person: the sign-off, or a question of a guided failure (a pending
-                              interruption of type ManualIntervention; a pause Octopus answers itself, such
-                              as the wait for Argo CD to sync, is executing)
+                              interruption of type ManualIntervention, whether Octopus calls the task executing
+                              or queued meanwhile; a pause Octopus answers itself, such as the wait for Argo CD
+                              to sync, is executing)
                    succeeded, failed, canceled   ended, at "finished"
       since        when it started, or when it was queued while it has not started (UTC)
       finished     when it ended (UTC); absent while it has not
@@ -138,7 +139,13 @@ function Get-DeploymentState {
     # What a task's state means for someone who looks at the wall.
     param([Parameter(Mandatory)] [object] $Task)
     switch ([string] $Task.State) {
-        'Queued' { return 'queued' }
+        'Queued' {
+            # Octopus puts a task that stops for a person at its start back in the queue, where it takes no place of
+            # the task limit (cmdemo2, 2026-10-08: a promotion at its sign-off for hours, state Queued). The pending
+            # manual intervention tells it from one that waits its turn.
+            if (Test-WaitsForPerson -Task $Task) { return 'waiting' }
+            return 'queued'
+        }
         'Success' { return 'succeeded' }
         'Failed' { return 'failed' }
         'TimedOut' { return 'failed' }
