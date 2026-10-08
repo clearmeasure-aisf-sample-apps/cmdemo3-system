@@ -125,6 +125,12 @@ resource "octopusdeploy_variable" "azure_account" {
 # The deployable projects' step "Revert pin" commits the previous image tag back through the GitHub API with this
 # token (repository secret OCTOPUS_GITHUB_TOKEN, the same token as the Git credential of the Argo CD steps).
 # Only in a system without a GitHub App of its own (github.tf).
+# It reaches only the steps whose script asks for it: the list of github.tf (token_steps), the same one the App's key
+# is scoped to, so there is one list for both credentials. Octopus hands a variable scoped to steps to no other step
+# and to no runbook: the steps that run an application's assemblies (the migration, the seeder, the acceptance tests)
+# do not receive it. A release made before the scope keeps the unscoped value until its variable snapshot is updated
+# (invoke-demo-promotion.ps1 does that at every promotion); a release whose process holds a step that was replaced
+# since has that step under an old id and gets no token there: make a new release.
 resource "octopusdeploy_variable" "github_token" {
   for_each = local.github_app == null ? octopusdeploy_project.deployable : {}
 
@@ -133,5 +139,9 @@ resource "octopusdeploy_variable" "github_token" {
   type            = "Sensitive"
   is_sensitive    = true
   sensitive_value = var.github_token
-  description     = "Step Revert pin commits the previous image tag with it, and a dashboard's deployment its content or its site's address. From repository secret OCTOPUS_GITHUB_TOKEN."
+  description     = "Step Revert pin commits the previous image tag with it, and a dashboard's deployment its content or its site's address. Scoped to the steps that read it. From repository secret OCTOPUS_GITHUB_TOKEN."
+
+  scope {
+    actions = local.token_steps[each.key]
+  }
 }
