@@ -75,6 +75,35 @@ function Set-JobOutput {
     if ($env:GITHUB_OUTPUT) { Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "$Name=$Value" }
 }
 
+function Remove-StaleStaticSite {
+    # A dashboard on Azure Static Web Apps that system.json no longer names (the deployable removed, or limited to
+    # fewer environments, deployables[].environments): the stack only detaches what it no longer holds, so that a
+    # mistake in the template deletes nothing, and a detached site would keep counting against the subscription's ten
+    # Free sites. This one kind is deleted here, and only sites this system's template made: by the tags it gives them.
+    param([Parameter(Mandatory)] [hashtable] $System, [Parameter(Mandatory)] [string] $ResourceGroup)
+    $slug = [string] $System.system.slug
+    $environments = @($System.environments | ForEach-Object { [string] $_.name })
+    $sitesWanted = @(foreach ($deployable in @($System.deployables | Where-Object { [string] $_['hosting'] -eq 'staticwebapp' })) {
+            $named = if ($deployable['environments']) { @($deployable.environments | ForEach-Object { [string] $_ }) } else { $environments }
+            foreach ($name in $named) { "swa-$slug-$name-$([string] $deployable.name)" }
+        })
+    $sitesFound = @(az staticwebapp list --resource-group $ResourceGroup --query "[?tags.system=='$slug' && tags.deployable!=null].name" --only-show-errors --output tsv | Where-Object { $_ })
+    $sitesStale = @($sitesFound | Where-Object { $sitesWanted -notcontains $_ })
+    if ($sitesStale.Count -eq 0) { return }
+    foreach ($site in $sitesStale) {
+        # --no-wait: waiting reads Microsoft.Web/locations/staticSitesOperationStatuses at the subscription, and this
+        # identity's roles are on the system's resource groups. The group's own list says when the site is gone.
+        az staticwebapp delete --name $site --resource-group $ResourceGroup --yes --no-wait --only-show-errors --output none
+    }
+    $deadline = (Get-Date).AddMinutes(5)
+    do {
+        Start-Sleep -Seconds 10
+        $sitesLeft = @(az staticwebapp list --resource-group $ResourceGroup --query '[].name' --only-show-errors --output tsv | Where-Object { $sitesStale -contains $_ })
+    } while ($sitesLeft.Count -gt 0 -and (Get-Date) -lt $deadline)
+    if ($sitesLeft.Count -gt 0) { throw "FAIL static site(s) $($sitesLeft -join ', ') still exist five minutes after their deletion was asked for" }
+    foreach ($site in $sitesStale) { Write-Host "PASS static site $site removed: system.json no longer names it" }
+}
+
 # The cluster's power state, or nothing before the first apply created it.
 $PSNativeCommandUseErrorActionPreference = $false
 $power = [string] (az aks show --resource-group $resourceGroup --name $clusterName --query powerState.code --output tsv 2>$null)
@@ -104,30 +133,7 @@ Write-Host "==> Cluster $clusterName (stack-$slug-cluster in $resourceGroup)"
 az stack group create --name "stack-$slug-cluster" --resource-group $resourceGroup `
     --template-file (Join-Path $Root 'infra' 'cluster.bicep') `
     --action-on-unmanage detachAll --deny-settings-mode none --yes --output none
-# A dashboard on Azure Static Web Apps that system.json no longer names (the deployable removed, or limited to fewer
-# environments, deployables[].environments): the stack only detaches what it no longer holds, so that a mistake in the
-# template deletes nothing, and a detached site would keep counting against the subscription's ten Free sites. This
-# one kind is deleted here, and only sites this system's template made: by the tags it gives them.
-$sitesWanted = @(foreach ($deployable in @($system.deployables | Where-Object { [string] $_['hosting'] -eq 'staticwebapp' })) {
-        $named = if ($deployable['environments']) { @($deployable.environments | ForEach-Object { [string] $_ }) } else { $environments }
-        foreach ($name in $named) { "swa-$slug-$name-$([string] $deployable.name)" }
-    })
-$sitesFound = @(az staticwebapp list --resource-group $resourceGroup --query "[?tags.system=='$slug' && tags.deployable!=null].name" --only-show-errors --output tsv | Where-Object { $_ })
-$sitesStale = @($sitesFound | Where-Object { $sitesWanted -notcontains $_ })
-foreach ($site in $sitesStale) {
-    # --no-wait: waiting reads Microsoft.Web/locations/staticSitesOperationStatuses at the subscription, and this
-    # identity's roles are on the system's resource groups. The group's own list says when the site is gone.
-    az staticwebapp delete --name $site --resource-group $resourceGroup --yes --no-wait --only-show-errors --output none
-}
-if ($sitesStale.Count -gt 0) {
-    $deadline = (Get-Date).AddMinutes(5)
-    do {
-        Start-Sleep -Seconds 10
-        $sitesLeft = @(az staticwebapp list --resource-group $resourceGroup --query '[].name' --only-show-errors --output tsv | Where-Object { $sitesStale -contains $_ })
-    } while ($sitesLeft.Count -gt 0 -and (Get-Date) -lt $deadline)
-    if ($sitesLeft.Count -gt 0) { throw "FAIL static site(s) $($sitesLeft -join ', ') still exist five minutes after their deletion was asked for" }
-    foreach ($site in $sitesStale) { Write-Host "PASS static site $site removed: system.json no longer names it" }
-}
+Remove-StaleStaticSite -System $system -ResourceGroup $resourceGroup
 $env:KUBECONFIG = Join-Path ([IO.Path]::GetTempPath()) "kubeconfig-$slug"
 # --only-show-errors: the CLI reports the merged context as a WARNING line.
 az aks get-credentials --resource-group $resourceGroup --name $clusterName --admin --overwrite-existing --file $env:KUBECONFIG --only-show-errors --output none
