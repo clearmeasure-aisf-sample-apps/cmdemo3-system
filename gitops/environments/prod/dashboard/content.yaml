@@ -16,7 +16,7 @@ data:
         "costUrl": "https://raw.githubusercontent.com/clearmeasure-aisf-sample-apps/cmdemo3-system/status/cost.json",
         "deploymentsUrl": "https://raw.githubusercontent.com/clearmeasure-aisf-sample-apps/cmdemo3-system/deployments/deployments.json"
       },
-      "generated": "2026-10-08T17:48:40Z",
+      "generated": "2026-10-08T23:34:36Z",
       "cluster": {
         "name": "aks-cmdemo3",
         "statusUrl": "https://cmdemo3-cluster.20-225-155-175.sslip.io/cluster.json",
@@ -256,7 +256,7 @@ data:
     }
   runtime-index.json: |
     {
-      "generated": "2026-10-08T17:48:40Z",
+      "generated": "2026-10-08T23:34:36Z",
       "plantuml": "1.2026.8",
       "environments": [
         {
@@ -362,7 +362,7 @@ data:
           "kind": "dashboard"
         }
       ],
-      "generated": "2026-10-08T17:48:40Z",
+      "generated": "2026-10-08T23:34:36Z",
       "plantuml": "1.2026.8"
     }
   runtime-prod.puml: |
@@ -492,7 +492,7 @@ data:
           "kind": "dashboard"
         }
       ],
-      "generated": "2026-10-08T17:48:40Z",
+      "generated": "2026-10-08T23:34:36Z",
       "plantuml": "1.2026.8"
     }
   runtime-tdd.puml: |
@@ -622,7 +622,7 @@ data:
           "kind": "dashboard"
         }
       ],
-      "generated": "2026-10-08T17:48:40Z",
+      "generated": "2026-10-08T23:34:36Z",
       "plantuml": "1.2026.8"
     }
   runtime-uat.puml: |
