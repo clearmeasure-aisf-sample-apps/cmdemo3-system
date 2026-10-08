@@ -116,9 +116,9 @@ function Get-FolderDiff {
     $PSNativeCommandUseErrorActionPreference = $true
     if ($code -gt 1) { throw "git diff failed: $($lines -join "`n")" }
     # git diff --no-index names the files by their full paths: show them relative to the folders.
-    $before = "$(($Before -replace '\\', '/').TrimStart('/'))/"
-    $after = "$(($After -replace '\\', '/').TrimStart('/'))/"
-    $lines | ForEach-Object { $_.Replace($before, '').Replace($after, '') }
+    $beforePrefix = "$(($Before -replace '\\', '/').TrimStart('/'))/"
+    $afterPrefix = "$(($After -replace '\\', '/').TrimStart('/'))/"
+    $lines | ForEach-Object { $_.Replace($beforePrefix, '').Replace($afterPrefix, '') }
 }
 
 function Get-BaseDiff {

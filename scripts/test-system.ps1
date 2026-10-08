@@ -107,6 +107,10 @@ foreach ($deployable in $system.deployables) {
     if ($deployable.ContainsKey('hosting')) {
         Test-Rule "deployable $name hosting" (@('staticsite', 'staticwebapp') -ccontains [string] $deployable.hosting) 'left out for an app, or "staticsite" or "staticwebapp"'
     }
+    if ($deployable.ContainsKey('environments')) {
+        $listed = $deployable.environments
+        Test-Rule "deployable $name environments" ($siteNames -contains $name -and $listed -is [array] -and $listed.Count -gt 0 -and @($listed | Where-Object { $_ -isnot [string] -or @($system.environments | ForEach-Object { [string] $_.name }) -cnotcontains $_ }).Count -eq 0) 'only for hosting "staticwebapp": a list of environment names of system.json, the ones the site exists in (one site shows every environment)'
+    }
     if ($siteNames -contains $name) {
         Test-Rule "deployable $name port" (-not $deployable.ContainsKey('port')) 'a site outside the cluster has no container: leave port out'
         Test-Rule "deployable $name healthPath is /" ([string] $deployable['healthPath'] -ceq '/') 'a Static Web App answers at /'
