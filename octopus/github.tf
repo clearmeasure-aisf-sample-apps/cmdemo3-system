@@ -34,7 +34,8 @@ locals {
     ]
   ])
 
-  # The steps that get the App's key, per deployable project: the ones whose script calls GitHub for this repository
+  # The steps that get the App's key or, in a system without an App, the stored token (variables.tf, GitHub.Token),
+  # per deployable project: the ones whose script calls GitHub for this repository
   # ("Revert pin" commits the previous tag; a dashboard's "Write dashboard content" and "Update deployable" commit its
   # content or its site's address; "Verify deployable" of a site reads that record). Each runs a script of this
   # repository and nothing else. No other step has the key: a step that runs code from an application's repository
