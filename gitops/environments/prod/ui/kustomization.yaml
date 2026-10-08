@@ -8,4 +8,4 @@ resources:
   - ../system/apps/ui
 images:
   - name: acrcmdemo3q3zmsi.azurecr.io/cmdemo3/ui
-    newTag: "2.4.23"
+    newTag: "2.4.24"
