@@ -50,8 +50,10 @@ $templates = Join-Path $Root 'gitops' 'templates' 'environment'
 # A long diff is cut in the summary; the job log keeps the whole of it.
 $maxLines = 400
 
-# What-if reports properties Azure fills in itself as Delete and expressions it cannot evaluate before deployment
-# (reference(), such as the cluster's OIDC issuer) as Modify. Neither is a change this commit makes.
+# What-if reports properties Azure fills in itself as Delete, expressions it cannot evaluate before deployment
+# (reference(), such as the cluster's OIDC issuer) as Modify, and write-only properties as Create (Application
+# Insights takes Flow_Type and Request_Source and never returns them). None of them is a change this commit makes.
+$writeOnlyPaths = @('properties.Flow_Type', 'properties.Request_Source')
 function Get-PropertyChange {
     param($Delta, [string] $Prefix = '')
     foreach ($item in @($Delta)) {
@@ -62,6 +64,7 @@ function Get-PropertyChange {
             continue
         }
         if ($item.propertyChangeType -in @('Delete', 'NoEffect')) { continue }
+        if ($writeOnlyPaths -contains $path) { continue }
         if (($item.after | ConvertTo-Json -Depth 20 -Compress) -match '\[[a-zA-Z]+\(') { continue }
         $path
     }
