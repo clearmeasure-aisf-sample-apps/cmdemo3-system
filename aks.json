@@ -1,0 +1,36 @@
+{
+  "generated": "2026-10-10T23:53:54Z",
+  "name": "aks-cmdemo3",
+  "resourceGroup": "rg-cmdemo3-cluster",
+  "location": "southcentralus",
+  "availability": {
+    "state": "Available",
+    "summary": "There are no known issues affecting this kubernetes cluster.",
+    "reason": null,
+    "occurredAt": "2026-10-08T16:45:21Z"
+  },
+  "powerState": "Running",
+  "provisioningState": "Succeeded",
+  "kubernetesVersion": "1.35.7",
+  "tier": "Free",
+  "pools": [
+    {
+      "name": "system",
+      "mode": "System",
+      "count": 1,
+      "size": "Standard_D4as_v6",
+      "osDiskGb": 128,
+      "powerState": "Running",
+      "provisioningState": "Succeeded",
+      "kubernetesVersion": "1.35.7"
+    }
+  ],
+  "metrics": {
+    "windowMinutes": 15,
+    "nodeCpuPercent": 5.6,
+    "nodeMemoryPercent": 51.0,
+    "nodeDiskPercent": null,
+    "apiServerCpuPercent": 9.4,
+    "apiServerMemoryPercent": 36.0
+  }
+}
