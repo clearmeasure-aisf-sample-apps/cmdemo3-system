@@ -121,3 +121,6 @@ $status = [ordered] @{
 }
 $status | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $Path -Encoding utf8NoBOM
 Write-Host "PASS $Path written"
+# A workflow step in GitHub's pwsh shell ends with the exit code of the last program the script ran. This script
+# runs programs whose refusal it expects and reports: it says its own exit code.
+exit 0

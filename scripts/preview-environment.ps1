@@ -213,3 +213,6 @@ else {
     Add-Content -LiteralPath $summary -Value ((@("**Azure (infra/cluster.bicep in $group)**: job cluster-apply applies it on the merge.", '', '| Change | Resource | Properties |', '|---|---|---|') + $rows + '') -join "`n")
 }
 Write-Host "PASS what-if of infra/cluster.bicep: $($changes.Count) resource(s) change"
+# A workflow step in GitHub's pwsh shell ends with the exit code of the last program the script ran. This script
+# runs programs whose refusal it expects and reports: it says its own exit code.
+exit 0

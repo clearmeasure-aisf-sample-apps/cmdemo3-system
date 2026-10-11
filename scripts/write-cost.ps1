@@ -487,3 +487,6 @@ if ($unread.Count -gt 0 -and $before) {
 [IO.File]::WriteAllText($target, "$($document | ConvertTo-Json -Depth 10)`n")
 $month = if ($null -ne $total.monthToDate) { "$(Format-Amount $total.monthToDate) $($document.currency) since $(Format-Day $monthStart)" } else { 'the month to date not known' }
 Write-Pass "$target`: $slug as of $(Format-Day $asOf): $month, $($entries.Count) entries ($(@($entries | ForEach-Object { $_.name }) -join ', ')), $($read.Count) of $($groups.Count) resource groups read, $unknown numbers not determined"
+# Said as an exit code: a workflow step in GitHub's pwsh shell ends with the exit code of the last program the script
+# ran, which may be one whose refusal was expected and handled (write-delivery.ps1 failed its workflow that way).
+exit 0

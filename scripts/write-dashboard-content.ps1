@@ -25,7 +25,9 @@
          nothing restarts.
       4. Waits until the site serves the topology it wrote.
     The links into the Azure portal are conventions over system.json (the cluster, and with capability "telemetry" the
-    environment's Application Insights); the portal asks the viewer to sign in.
+    environment's Application Insights); the portal asks the viewer to sign in. The manifest of a runtime diagram
+    says where each box leads that topology.json has no link for (the subscription, the resource group, the cluster,
+    the namespace, SQL Server, a static site, the browser: "links", see ConvertTo-ClusterDiagram).
 
     The same dashboard outside the cluster (hosting "staticwebapp": step "Update deployable" of its project, an Azure
     script on the hosted worker pool as the tier's deploy identity, so it runs while the cluster is stopped) gets 1 and
@@ -300,6 +302,15 @@ function ConvertTo-ClusterDiagram {
     #
     # Slots: every node's description is a transparent image of a fixed size, and so is the description of the
     # namespace and of every relationship that carries a number: the dashboard draws the live values into them.
+    #
+    # Links: where a box leads when the topology has no link for it. The manifest lists every frame that is no region
+    # ("frames": alias, qualifiedName, kind, name) and gives a frame, the namespace or a node "links", a map of one key:
+    #   portal      the resource's page in the Azure portal, from its id: the subscription, the resource group, the AKS
+    #               cluster, a Static Web App next to the cluster
+    #   namespaces  the namespace's frame: the cluster's namespaces in the Azure portal
+    #   workloads   SQL Server's StatefulSet and a static site in the cluster: the cluster's workloads in the portal
+    #   site        the browser's box: the first public address of the diagram
+    # An app's Deployment has its links in topology.json, as before. Without azure.subscriptionId only "site" is there.
     param(
         [Parameter(Mandatory)] [hashtable] $System,
         [Parameter(Mandatory)] [System.Collections.IDictionary] $Topology,
@@ -318,6 +329,13 @@ function ConvertTo-ClusterDiagram {
     $apps = if ($topologyEnvironment) { @($topologyEnvironment.deployables | Where-Object { $dashboardNames -notcontains [string] $_.name }) } else { @() }
     $clusterName = [string] $System.cluster.name
     $nodeText = "$([string] $System.cluster['nodeCount']) x $([string] $System.cluster['nodeSize'])"
+    # The ids the links are made of: empty where system.json does not say enough to name the resource.
+    $azure = if ($System['azure']) { $System.azure } else { @{} }
+    $tenantId = [string] $azure['tenantId']
+    $subscription = if ($azure['subscriptionId']) { "/subscriptions/$([string] $azure.subscriptionId)" } else { '' }
+    $groupName = if ($azure['resourceGroups']) { [string] $azure.resourceGroups['cluster'] } else { '' }
+    $groupId = if ($subscription -and $groupName) { "$subscription/resourceGroups/$groupName" } else { '' }
+    $clusterId = if ($groupId -and $clusterName) { "$groupId/providers/Microsoft.ContainerService/managedClusters/$clusterName" } else { '' }
     $edition = if ($System['sql'] -and $System.sql['edition']) { [string] $System.sql.edition } else { '' }
 
     $aliasOf = @{}
@@ -333,18 +351,45 @@ function ConvertTo-ClusterDiagram {
     function Get-Quoted { param([string] $Text) '"' + ($Text -replace '"', "'") + '"' }
 
     # Slots (pixels): an app's tile holds the badge, seven lines 15 px apart and the history strip; the database's and
-    # the site's a badge and a line; the namespace's one line; a relationship's the number in its frame.
-    $tileSlot = "<img:$(New-TransparentPng -Width 250 -Height 146)>"
+    # the site's a badge and a line; the namespace's one line; a relationship's the number in its frame. A node a
+    # deployment changes (an app, a static site: every node with a deployable) has two lines more, 30 px: the
+    # activity lines, where the dashboard says in words what is being deployed there, a deployment freeze and the last
+    # deployment that ended (deployments.json). They are a tile's last lines, so a diagram rendered before them has no
+    # row for them and loses nothing else.
+    $activityRows = 30
+    $tileSlot = "<img:$(New-TransparentPng -Width 250 -Height (146 + $activityRows))>"
     $smallTileSlot = "<img:$(New-TransparentPng -Width 250 -Height 46)>"
+    $siteSlot = "<img:$(New-TransparentPng -Width 250 -Height (46 + $activityRows))>"
     $regionSlot = "<img:$(New-TransparentPng -Width 190 -Height 22)>"
     $edgeSlot = "<img:$(New-TransparentPng -Width 160 -Height 34)>"
 
     $nodes = [Collections.Generic.List[object]]::new()
     $edges = [Collections.Generic.List[object]]::new()
+    $frames = [Collections.Generic.List[object]]::new()
+    $publicAddress = [Collections.Generic.List[string]]::new()
     $edgeLines = [Collections.Generic.List[string]]::new()
+    function Get-PortalLink {
+        # The "links" of a resource by its id: a page of it in the Azure portal under the key; nothing without the id.
+        param([AllowEmptyString()] [string] $ResourceId, [string] $Key = 'portal', [string] $Blade = 'overview')
+        if (-not $ResourceId) { return $null }
+        return [ordered] @{ $Key = Get-PortalAddress -ResourceId $ResourceId -Blade $Blade -TenantId $tenantId }
+    }
+    function Add-Node {
+        param([System.Collections.Specialized.OrderedDictionary] $Node, [AllowNull()] [System.Collections.IDictionary] $Links = $null)
+        if ($Links -and $Links.Count -gt 0) { $Node.links = $Links }
+        $nodes.Add($Node)
+    }
+    function Add-Frame {
+        # A frame that is no region: the dashboard knows it by its alias, and its name leads where "links" says.
+        param([string] $Alias, [string] $QualifiedName, [string] $Kind, [string] $Name, [AllowNull()] [System.Collections.IDictionary] $Links = $null)
+        $frame = [ordered] @{ alias = $Alias; qualifiedName = $QualifiedName; kind = $Kind; name = $Name }
+        if ($Links -and $Links.Count -gt 0) { $frame.links = $Links }
+        $frames.Add($frame)
+    }
     function Add-Edge {
         param([string] $From, [string] $To, [string] $Kind, [string] $Label, [string] $Technology, [bool] $Slot, [string] $Link = '')
         $edges.Add([ordered] @{ id = "$From-to-$To"; from = $From; to = $To; kind = $Kind })
+        if ($Kind -eq 'public' -and $Link) { $publicAddress.Add($Link) }
         $description = if ($Slot) { $edgeSlot + '\n<U+00A0>' } else { '' }
         $address = if ($Link) { ", `$link=$(Get-Quoted $Link)" } else { '' }
         $edgeLines.Add("Rel($From, $To, $(Get-Quoted $Label), $(Get-Quoted $Technology), $(Get-Quoted $description)$address)")
@@ -385,9 +430,12 @@ function ConvertTo-ClusterDiagram {
     $lines.Add('Person(browser, "Browser", "a user, or this dashboard")')
     $nodes.Add([ordered] @{ alias = 'browser'; qualifiedName = 'browser'; kind = 'person'; name = 'Browser' })
     $lines.Add('Boundary(sub, "Azure subscription", $type="subscription", $tags="scope") {')
+    Add-Frame 'sub' 'sub' 'subscription' 'Azure subscription' (Get-PortalLink $subscription)
     $lines.Add("  Boundary(rg_cluster, $(Get-Quoted ([string] $System.azure.resourceGroups.cluster)), `$type=`"resource group`", `$tags=`"scope`") {")
+    Add-Frame 'rg_cluster' 'sub.rg_cluster' 'resourceGroup' ([string] $System.azure.resourceGroups.cluster) (Get-PortalLink $groupId)
     $ingress = if ($System.cluster['ingressIp']) { "one public address, $([string] $System.cluster.ingressIp) (Envoy Gateway), for every environment" } else { '' }
     $lines.Add("    Deployment_Node(cluster, $(Get-Quoted $clusterName), $(Get-Quoted "AKS cluster, $([string] $System.system.location): $nodeText"), $(Get-Quoted $ingress), `$tags=`"plan`") {")
+    Add-Frame 'cluster' 'sub.rg_cluster.cluster' 'cluster' $clusterName (Get-PortalLink $clusterId)
     $path = 'sub.rg_cluster.cluster.region_primary'
     $lines.Add("      Deployment_Node(region_primary, $(Get-Quoted $namespace), $(Get-Quoted "namespace: environment $Environment"), $(Get-Quoted $regionSlot), `$tags=`"region`") {")
     foreach ($app in $apps) {
@@ -399,12 +447,12 @@ function ConvertTo-ClusterDiagram {
     }
     $database = if ($edition) { "SQL Server 2022 $edition, StatefulSet" } else { 'SQL Server, StatefulSet' }
     $lines.Add("        ContainerDb(sqldb, `"db`", $(Get-Quoted $database), $(Get-Quoted $smallTileSlot))")
-    $nodes.Add([ordered] @{ alias = 'sqldb'; qualifiedName = "$path.sqldb"; kind = 'sql'; name = "$namespace/db"; region = $namespace; regionAlias = 'region_primary'; url = $null })
+    Add-Node ([ordered] @{ alias = 'sqldb'; qualifiedName = "$path.sqldb"; kind = 'sql'; name = "$namespace/db"; region = $namespace; regionAlias = 'region_primary'; url = $null }) (Get-PortalLink $clusterId 'workloads' 'workloads')
     foreach ($static in $statics) {
         $alias = "swa_$(Get-DeployableAlias $static.name)"
-        $lines.Add("        Container($alias, $(Get-Quoted ([string] $static.name)), $(Get-Quoted "static site: $($static.name)"), $(Get-Quoted $smallTileSlot))")
+        $lines.Add("        Container($alias, $(Get-Quoted ([string] $static.name)), $(Get-Quoted "static site: $($static.name)"), $(Get-Quoted $siteSlot))")
         $address = if ($DashboardUrl["$Environment/$($static.name)"]) { [string] $DashboardUrl["$Environment/$($static.name)"] } else { $null }
-        $nodes.Add([ordered] @{ alias = $alias; qualifiedName = "$path.$alias"; kind = 'staticsite'; deployable = [string] $static.name; name = "$namespace/$($static.name)"; region = $namespace; regionAlias = 'region_primary'; url = $address })
+        Add-Node ([ordered] @{ alias = $alias; qualifiedName = "$path.$alias"; kind = 'staticsite'; deployable = [string] $static.name; name = "$namespace/$($static.name)"; region = $namespace; regionAlias = 'region_primary'; url = $address }) (Get-PortalLink $clusterId 'workloads' 'workloads')
     }
     $lines.Add('      }')
     $lines.Add('    }')
@@ -415,9 +463,9 @@ function ConvertTo-ClusterDiagram {
         # site it is (the one of the first environment it names).
         $siteEnvironment = if ($site['environments'] -and @($site.environments | ForEach-Object { [string] $_ }) -notcontains $Environment) { [string] @($site.environments)[0] } else { $Environment }
         $siteName = "swa-$slug-$siteEnvironment-$($site.name)"
-        $lines.Add("    Container($alias, $(Get-Quoted $siteName), $(Get-Quoted "Azure Static Web App: $($site.name)"), $(Get-Quoted $smallTileSlot))")
+        $lines.Add("    Container($alias, $(Get-Quoted $siteName), $(Get-Quoted "Azure Static Web App: $($site.name)"), $(Get-Quoted $siteSlot))")
         $address = if ($DashboardUrl["$siteEnvironment/$($site.name)"]) { [string] $DashboardUrl["$siteEnvironment/$($site.name)"] } else { $null }
-        $nodes.Add([ordered] @{ alias = $alias; qualifiedName = "sub.rg_cluster.$alias"; kind = 'staticsite'; deployable = [string] $site.name; name = $siteName; url = $address })
+        Add-Node ([ordered] @{ alias = $alias; qualifiedName = "sub.rg_cluster.$alias"; kind = 'staticsite'; deployable = [string] $site.name; name = $siteName; url = $address }) (Get-PortalLink $(if ($groupId) { "$groupId/providers/Microsoft.Web/staticSites/$siteName" } else { '' }))
     }
     $lines.Add('  }')
     $lines.Add('}')
@@ -438,6 +486,11 @@ function ConvertTo-ClusterDiagram {
     }
     $lines.AddRange($edgeLines)
     $lines.Add('@enduml')
+    # The browser's box leads where a browser goes first: the first public address the diagram draws an arrow to.
+    if ($publicAddress.Count -gt 0) { $nodes[0].links = [ordered] @{ site = $publicAddress[0] } }
+    $region = [ordered] @{ alias = 'region_primary'; qualifiedName = $path; name = $namespace; roles = @('primary') }
+    $regionLinks = Get-PortalLink $clusterId 'namespaces' 'namespaces'
+    if ($regionLinks) { $region.links = $regionLinks }
 
     return [ordered] @{
         puml     = ($lines -join "`n") + "`n"
@@ -445,7 +498,8 @@ function ConvertTo-ClusterDiagram {
             environment = $Environment
             svg         = "$Environment.svg"
             nodes       = @($nodes)
-            regions     = @([ordered] @{ alias = 'region_primary'; qualifiedName = $path; name = $namespace; roles = @('primary') })
+            regions     = @($region)
+            frames      = @($frames)
             edges       = @($edges)
         }
     }
@@ -453,7 +507,7 @@ function ConvertTo-ClusterDiagram {
 
 function Test-RuntimeSvg {
     # The handles the dashboard relies on, in an SVG PlantUML rendered: one <g class="entity"> per node (with its slot
-    # image), one <g class="cluster"> per region and one <g class="link"> per relationship, by the manifest. They are not a documented contract of PlantUML (they changed in 1.2026.3 and 1.2026.4), so every render
+    # image), one <g class="cluster"> per region and frame and one <g class="link"> per relationship, by the manifest. They are not a documented contract of PlantUML (they changed in 1.2026.3 and 1.2026.4), so every render
     # is checked. Returns what is missing, as text; nothing when all is there.
     param(
         [Parameter(Mandatory)] [string] $Svg,
@@ -483,6 +537,10 @@ function Test-RuntimeSvg {
     }
     foreach ($region in $Manifest.regions) {
         if ($clusters -notcontains $region.qualifiedName) { $missing.Add("region $($region.qualifiedName)") }
+    }
+    # A manifest from before the frames were listed has none.
+    foreach ($frame in @($Manifest['frames'])) {
+        if ($frame -and $clusters -notcontains $frame.qualifiedName) { $missing.Add("frame $($frame.qualifiedName)") }
     }
     foreach ($edge in $Manifest.edges) {
         if ($paths -notcontains $edge.id) { $missing.Add("relationship $($edge.id)") }
