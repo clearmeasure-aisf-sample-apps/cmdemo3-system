@@ -94,8 +94,14 @@ function Get-RepoFile([string] $Repo, [string] $Path) {
     $content = gh api "repos/$Repo/contents/$Path" --jq .content
     [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String((($content -join '') -replace '\s', '')))
 }
+function Find-Ruleset([string] $Repo) {
+    # The id of the repository's ruleset default-branch, or nothing when it has none. An answer that is not the list of
+    # its rulesets (403, no network) is an error of the check, not "no ruleset": gh ends with a non-zero exit code.
+    gh api "repos/$Repo/rulesets" --jq '.[] | select(.name=="default-branch") | .id'
+}
 function Get-RequiredCheck([string] $Repo) {
-    $id = gh api "repos/$Repo/rulesets" --jq '.[] | select(.name=="default-branch") | .id'
+    $id = Find-Ruleset $Repo
+    if (-not $id) { throw "$Repo has no ruleset default-branch" }
     @(gh api "repos/$Repo/rulesets/$id" --jq '.rules[] | select(.type=="required_status_checks") | .parameters.required_status_checks[].context')
 }
 function Get-Project([string] $Slug) { Invoke-Octopus "/api/$space/projects/$Slug" }
@@ -136,6 +142,15 @@ function Assert-AppRepository {
     $exists = $LASTEXITCODE -eq 0
     $PSNativeCommandUseErrorActionPreference = $true
     if (-not $exists) { Skip-Check "app repository $appRepo does not exist yet" }
+}
+# An application of the person's own (app.source "repository") has its repository before phase 4, which gives it the
+# ruleset default-branch. Until then the precondition of the checks that read it does not exist: they say which fact
+# is missing instead of failing (adameve, 2026-10-09: the first run of workflow system was red on CAP-003, CAP-010
+# and CAP-055). Only that fact skips: a ruleset without the required check fails, and so does an answer that is not
+# "there is none" (403, no network).
+function Get-AppRequiredCheck {
+    if (-not (Find-Ruleset $appRepo)) { Skip-Check "the application's repository $appRepo has no ruleset default-branch yet: phase 4 sets it" }
+    Get-RequiredCheck $appRepo
 }
 function Get-SystemAge {
     # Days since the system's first release: a runbook on a schedule cannot have run before its first due date.
@@ -255,7 +270,7 @@ function Assert-That([bool] $Condition, [string] $Message) { if (-not $Condition
 $checks = [ordered] @{
     'CAP-001' = { $rules = gh api "repos/$systemRepo/rulesets" --jq '[.[] | select(.name=="default-branch" and .enforcement=="active")] | length'; Assert-That ([int] $rules -eq 1) 'no active default-branch ruleset'; 'ruleset default-branch active' }
     'CAP-002' = { Assert-That ((Get-RepoFile $systemRepo '.github/workflows/env-checks.yml') -match 'preview-environment\.ps1') 'env-checks has no preview'; 'env-checks previews every environment and the cluster' }
-    'CAP-003' = { Assert-AppRepository; $s = Get-RequiredCheck $systemRepo; $a = Get-RequiredCheck $appRepo; Assert-That ($s -contains 'env-checks' -and $a -contains 'Build result') "required: $s / $a"; "system: $($s -join ', '); app: $($a -join ', ')" }
+    'CAP-003' = { Assert-AppRepository; $s = Get-RequiredCheck $systemRepo; $a = Get-AppRequiredCheck; Assert-That ($s -contains 'env-checks' -and $a -contains 'Build result') "required: $s / $a"; "system: $($s -join ', '); app: $($a -join ', ')" }
     'CAP-004' = {
         # The deployment records the version: step "Update deployable" is Octopus's step "Update Argo CD Application
         # Image Tags", and the tag in Git is the release Octopus deployed last. A failed deployment leaves its tag in
@@ -285,7 +300,7 @@ $checks = [ordered] @{
         Assert-That ($names.IndexOf('Verify revert') -eq $names.IndexOf('Revert pin') + 1) 'Verify revert does not stand right after Revert pin'
         'Revert pin runs on failure, after Update deployable, and Verify revert asks the app''s health after it'
     }
-    'CAP-010' = { Assert-AppRepository; Assert-That ((Get-RequiredCheck $appRepo) -contains 'Build result') 'Build result not required'; 'Build result required on the app' }
+    'CAP-010' = { Assert-AppRepository; Assert-That ((Get-AppRequiredCheck) -contains 'Build result') 'Build result not required'; 'Build result required on the app' }
     'CAP-011' = { $noisy = @(Get-NoisyDeployment); Assert-That ($noisy.Count -eq 0) "warnings in: $($noisy -join '; ')"; 'the current deployment of every project and environment logged no warning or error' }
     'CAP-012' = {
         # env-checks is the only workflow a pull request starts. Its one credentialed job, the preview, runs only for
@@ -466,7 +481,7 @@ $checks = [ordered] @{
         'plan Reader of the three groups; cluster Contributor of its group only; kubelet and feed AcrPull; push AcrPush; backup writes its storage account only'
     }
     'CAP-053' = { $u = az account show --query user.type --output tsv; $me = Invoke-Octopus '/api/users/me'; Assert-That ($u -eq 'servicePrincipal' -and $me.IsService) "az $u, Octopus service $($me.IsService)"; "az as a service principal, Octopus as $($me.Username)" }
-    'CAP-055' = { Assert-AppRepository; Assert-That ((Get-RequiredCheck $appRepo) -contains 'secret-scan' -and (Get-RepoFile $systemRepo '.github/workflows/env-checks.yml') -match 'gitleaks') 'secret scanning not enforced'; 'gitleaks in env-checks and the required check secret-scan' }
+    'CAP-055' = { Assert-AppRepository; Assert-That ((Get-AppRequiredCheck) -contains 'secret-scan' -and (Get-RepoFile $systemRepo '.github/workflows/env-checks.yml') -match 'gitleaks') 'secret scanning not enforced'; 'gitleaks in env-checks and the required check secret-scan' }
     'CAP-056' = {
         # Runbook "Rotate SQL passwords" ran in every environment in the last 35 days (it runs monthly).
         Assert-Awake
@@ -759,7 +774,22 @@ $checks = [ordered] @{
             $task = Invoke-Octopus "/api/tasks/$(([string] $entry['url']) -replace '^.*/tasks/', '')"
             Assert-That (-not $task.IsCompleted -or [datetimeoffset] $task.CompletedTime -gt $limit) "deployments.json calls $($entry['project']) $($entry['release']) to $($entry['environment']) $($entry['state']); in Octopus it ended over an hour ago ($($task.Id)): run workflow deployments"
         }
-        "deployments.json on branch deployments: $($inFlight.Count) in flight, as in Octopus; $($listed.Count - $inFlight.Count) ended in the last half hour"
+        # What the file says in words (a file from before these lists has none, and is checked as before): a
+        # deployment that waits says what for, every last deployment has its result and its task, every freeze its
+        # name and its end, and what could not be read is named, not left out silently.
+        $says = ''
+        if ($published.ContainsKey('missing')) {
+            $waits = @($inFlight | Where-Object { [string] $_['state'] -eq 'waiting' -and -not ($_['waitsFor'] -and $_['waitsFor']['kind']) })
+            Assert-That ($waits.Count -eq 0) "deployments.json has $($waits.Count) deployment(s) that wait for a person without saying what for (waitsFor.kind)"
+            $recent = @($published['recent'] | Where-Object { $_ })
+            $unsaid = @($recent | Where-Object { 'succeeded', 'failed', 'canceled' -notcontains [string] $_['result'] -or -not $_['project'] -or -not $_['environment'] -or -not $_['finished'] -or [string] $_['url'] -notmatch '/tasks/ServerTasks-\d+$' })
+            Assert-That ($unsaid.Count -eq 0) "deployments.json has $($unsaid.Count) entr(ies) of recent without a project, an environment, a result, the time it ended or its task"
+            $freezes = @($published['freezes'] | Where-Object { $_ })
+            Assert-That (@($freezes | Where-Object { -not $_['name'] -or -not $_['to'] }).Count -eq 0) 'deployments.json has a deployment freeze without a name or the time it ends'
+            $notRead = @($published['missing'] | Where-Object { $_ })
+            $says = "; the last deployment of $($recent.Count) project(s) and environment(s), $($freezes.Count) deployment freeze(s)$(if ($notRead.Count -gt 0) { "; not read: $($notRead -join ', ')" })"
+        }
+        "deployments.json on branch deployments: $($inFlight.Count) in flight, as in Octopus; $($listed.Count - $inFlight.Count) ended in the last half hour$says"
     }
 }
 

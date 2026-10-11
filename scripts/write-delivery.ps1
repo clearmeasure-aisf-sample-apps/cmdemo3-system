@@ -475,3 +475,8 @@ $target = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPat
 [IO.File]::WriteAllText($target, "$($document | ConvertTo-Json -Depth 10)`n")
 $failover = if ($document.failover) { "failover in $($document.failover.environment) at $($document.failover.at)" } else { 'no failover measured' }
 Write-Pass "$target`: $deployed of $($environments.Count * $projects.Count) deployments ($($environments.Count) environments, $($projects.Count) deployables), hourly health reports of $reported environment(s), $failover, $unknown facts not determined"
+# The file is written, and what could not be read is counted in it: that is this script's success. Said as an exit
+# code, because a workflow step in GitHub's pwsh shell ends with the exit code of the last program the script ran, and
+# that may be a "gh api" whose refusal was expected and counted (a commit of a private repository this workflow's token
+# cannot read): from 2026-10-10 cmdemo1's workflow delivery failed that way after writing its file, and published none.
+exit 0
