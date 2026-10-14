@@ -106,6 +106,14 @@ foreach ($name in $deployableNames) {
     Test-Rule "deployable $name is not 'system'" ($name -cne 'system') 'the Octopus project <slug>-system is the environments project'
 }
 # What runs in the cluster has its manifests in gitops/; a dashboard outside it (hosting "staticwebapp") has none.
+# deployables[].pipelineSignOff (decision 0048): true lets the system's service account <slug>-github answer that
+# deployable's Sign-off too, as the only member of the team "<slug> pipeline sign-off" (octopus/approvers.tf); a
+# workflow of this repository then promotes it with a reason naming its run. Every other deployable keeps a person's
+# or the operator's sign-off.
+foreach ($deployable in @($system.deployables | Where-Object { $_ -is [Collections.IDictionary] -and $_.ContainsKey('pipelineSignOff') })) {
+    Test-Rule "deployable $($deployable.name) pipelineSignOff" ($deployable.pipelineSignOff -is [bool]) 'true or false: whether the service account may answer the Sign-off of this deployable (decision 0048)'
+}
+
 $siteNames = @($system.deployables | Where-Object { [string] $_['hosting'] -eq 'staticwebapp' } | ForEach-Object { [string] $_.name })
 $clusterNames = @($deployableNames | Where-Object { $siteNames -notcontains $_ })
 foreach ($name in $clusterNames) {

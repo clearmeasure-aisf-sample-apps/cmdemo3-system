@@ -94,6 +94,15 @@ function Get-RepoFile([string] $Repo, [string] $Path) {
     $content = gh api "repos/$Repo/contents/$Path" --jq .content
     [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String((($content -join '') -replace '\s', '')))
 }
+function Find-RepoFile([string] $Repo, [string] $Path) {
+    # The text of a file on the repository's default branch, or nothing when the branch has no such file (404).
+    $PSNativeCommandUseErrorActionPreference = $false
+    $answer = @(gh api "repos/$Repo/contents/$Path" --jq .content 2>&1 | ForEach-Object { "$_" })
+    $code = $LASTEXITCODE
+    $PSNativeCommandUseErrorActionPreference = $true
+    if ($code -eq 0) { return [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String((($answer -join '') -replace '\s', ''))) }
+    if (($answer -join ' ') -notmatch 'HTTP 404') { throw "cannot read $Path of ${Repo}: $($answer -join ' ')" }
+}
 function Find-Ruleset([string] $Repo) {
     # The id of the repository's ruleset default-branch, or nothing when it has none. An answer that is not the list of
     # its rulesets (403, no network) is an error of the check, not "no ruleset": gh ends with a non-zero exit code.
@@ -266,6 +275,43 @@ function Get-RecentRun([string] $Runbook, [int] $Days) {
     $runs
 }
 function Assert-That([bool] $Condition, [string] $Message) { if (-not $Condition) { throw $Message } }
+function Get-UnwatchedBox([hashtable] $Manifest, [hashtable] $Topology, $Containers, [string] $Page = '') {
+    # The boxes of a runtime diagram that would show neither a probe state nor a health line (decision 0038), each as
+    # "<alias> <name>: <why>", by the rules of the default runtime's check: an app or a static site whose address the
+    # served topology lists, or the page's own site; SQL Server by the health check of a probed app that uses it; a box
+    # with ids by the health containers.json gives each ($Containers; this runtime publishes none, and its diagram has
+    # no such box). The browser and a dependency are not asked for.
+    $probed = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    if ($Page) { $null = $probed.Add($Page.TrimEnd('/')) }
+    foreach ($entry in @($Topology['environments'] | Where-Object { $_ })) {
+        foreach ($d in @($entry['deployables'] | Where-Object { $_ })) {
+            if ($d['frontDoor']) { $null = $probed.Add(([string] $d['frontDoor']).TrimEnd('/')) }
+            foreach ($node in @($d['nodes'] | Where-Object { $_ -and $_['url'] })) { $null = $probed.Add(([string] $node['url']).TrimEnd('/')) }
+        }
+    }
+    $healthOf = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    if ($Containers -is [System.Collections.IDictionary] -and $Containers['resources'] -is [System.Collections.IDictionary]) {
+        foreach ($listed in $Containers['resources'].Values) {
+            foreach ($record in @($listed | Where-Object { $_ -is [System.Collections.IDictionary] -and $_['id'] -and $_['health'] -is [System.Collections.IDictionary] })) { $null = $healthOf.Add([string] $record['id']) }
+        }
+    }
+    $boxes = @($Manifest['nodes'] | Where-Object { $_ -is [System.Collections.IDictionary] })
+    $probedAliases = @($boxes | Where-Object { $_['url'] -and $probed.Contains(([string] $_['url']).TrimEnd('/')) } | ForEach-Object { [string] $_['alias'] })
+    foreach ($box in $boxes) {
+        $kind = [string] $box['kind']
+        if ($kind -in 'person', 'dependency') { continue }
+        $boxIds = @($box['ids'] | Where-Object { $_ })
+        if ($boxIds.Count -gt 0 -and @($boxIds | Where-Object { -not $healthOf.Contains([string] $_) }).Count -eq 0) { continue }
+        $watched = switch ($kind) {
+            { $_ -in 'webapp', 'frontdoor', 'staticsite' } { $probedAliases -contains [string] $box['alias'] }
+            'containerapp' { [bool] $box['url'] }
+            'sql' { @($Manifest['edges'] | Where-Object { $_ -is [System.Collections.IDictionary] -and $_['kind'] -eq 'sql' -and $_['to'] -eq $box['alias'] -and $probedAliases -contains [string] $_['from'] }).Count -gt 0 }
+            default { $false }
+        }
+        if ($watched) { continue }
+        "$($box['alias']) $($box['name']): $(if ($boxIds.Count -eq 0) { 'no probe and no resource id' } else { 'no probe, and containers.json on branch status has no health for it' })"
+    }
+}
 
 $checks = [ordered] @{
     'CAP-001' = { $rules = gh api "repos/$systemRepo/rulesets" --jq '[.[] | select(.name=="default-branch" and .enforcement=="active")] | length'; Assert-That ([int] $rules -eq 1) 'no active default-branch ruleset'; 'ruleset default-branch active' }
@@ -413,7 +459,14 @@ $checks = [ordered] @{
             Assert-That ($null -ne $s -and $s.Name -eq 'Sign-off' -and $s.Actions[0].ActionType -eq 'Octopus.Manual') "$project does not start with Sign-off"
             $responsible = $s.Actions[0].Properties.PSObject.Properties['Octopus.Action.Manual.ResponsibleTeamIds']
             $responsibleIds = if ($responsible) { [string] $responsible.Value } else { '' }
-            Assert-That ($responsibleIds -eq $team.Id) "the Sign-off of $project is for '$responsibleIds', not for team '$teamName' ($($team.Id))"
+            # A deployable with pipelineSignOff (decision 0048) has a second responsible team, "<slug> pipeline
+            # sign-off"; any other Sign-off has the approvers alone.
+            $ids = @($responsibleIds -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+            $pipeline = $project -ne $systemProject -and @($system.deployables | Where-Object { "$slug-$($_.name)" -eq $project -and $_['pipelineSignOff'] -eq $true }).Count -gt 0
+            $pipelineTeam = if ($pipeline) { @((Invoke-Octopus "/api/$space/teams?partialName=$([uri]::EscapeDataString("$slug pipeline sign-off"))&take=100").Items | Where-Object { $_.Name -eq "$slug pipeline sign-off" -and $_.SpaceId -eq $space }) | Select-Object -First 1 }
+            $want = @($team.Id) + @(if ($pipelineTeam) { $pipelineTeam.Id })
+            Assert-That (-not $pipeline -or $null -ne $pipelineTeam) "$project has pipelineSignOff, and the space has no team '$slug pipeline sign-off'"
+            Assert-That ((@($ids | Sort-Object) -join ',') -eq (@($want | Sort-Object) -join ',')) "the Sign-off of $project is for '$responsibleIds', not for $(if ($pipeline) { "teams '$teamName' and '$slug pipeline sign-off'" } else { "team '$teamName'" }) ($($want -join ','))"
         }
         Assert-That ((Get-RepoFile $systemRepo 'octopus/projects.tf') -match 'octopusdeploy_project_deployment_freeze') 'no freeze support'; "Sign-off first in both projects, for team '$teamName'; freezes from system.json"
     }
@@ -537,7 +590,8 @@ $checks = [ordered] @{
         # cluster, or "staticwebapp", outside it) serves, in every environment it runs in, the topology its deployment
         # wrote: every environment of system.json and, for each app, its node <namespace>/<app>. A topology older than
         # system.json fails: deploy the dashboard again. Its Runtime view has, in runtime/index.json, every environment
-        # with a manifest and an SVG the site serves.
+        # with a manifest and an SVG the site serves, and every box of a diagram has a probe state or a health line
+        # (Get-UnwatchedBox, decision 0038).
         if ($dashboards.Count -eq 0) { Skip-Check 'no dashboard (a deployable with hosting staticsite or staticwebapp) yet' }
         $want = @(foreach ($e in $environments) { foreach ($app in $apps) { "$e/$($app.name)/$slug-$e/$($app.name)" } })
         $shown = foreach ($dashboard in $dashboards) {
@@ -566,6 +620,11 @@ $checks = [ordered] @{
                         $part = Invoke-WebRequest -Uri "$url/runtime/$file" -TimeoutSec 120 -SkipHttpErrorCheck
                         Assert-That ($part.StatusCode -eq 200 -and $part.RawContentLength -gt 0) "the Runtime view of $dashboardName in $e does not serve runtime/$file (HTTP $($part.StatusCode))"
                     }
+                    # Every box shows that what it stands for is online (decision 0038): this runtime runs no container
+                    # app and draws no resource box, so each box is probed, or SQL Server is told by a probed app.
+                    $drawnManifest = Get-Text (Invoke-WebRequest -Uri "$url/runtime/$([string] $entry['manifest'])" -TimeoutSec 120) | ConvertFrom-Json -AsHashtable
+                    $unwatched = @(Get-UnwatchedBox $drawnManifest $topology $null $url)
+                    Assert-That ($unwatched.Count -eq 0) "the Runtime view of $dashboardName in $e draws box(es) of $($entry['name']) with neither a probe nor a health line: $($unwatched -join '; '): deploy the release of $slug-$dashboardName to $e again"
                 }
                 "$dashboardName $e $url"
             }
@@ -634,6 +693,11 @@ $checks = [ordered] @{
                 Assert-That (-not $settled -or [string] $fact['version'] -eq $deployment.Version) "delivery.json says $name $($fact['version']) in $e, Octopus deployed $($deployment.Version): run workflow delivery"
                 "$e $name $($fact['version'])"
             }
+            # The cluster runs no container app: the hourly health of the file names none (health.containerApps, which
+            # write-delivery.ps1 reads on runtime containerapps only), so no deployable is taken for one.
+            $health = $entry['health']
+            $named = @(if ($health -is [System.Collections.IDictionary]) { $health['containerApps'] | Where-Object { $_ } })
+            Assert-That ($named.Count -eq 0) "delivery.json names container apps in the hourly health of $e, and runtime aks-argocd runs none: $(@($named | ForEach-Object { $_['name'] }) -join ', ')"
         }
         "delivery facts on branch status: $(@($compared).Count) deployment(s) match Octopus"
     }
@@ -791,6 +855,79 @@ $checks = [ordered] @{
         }
         "deployments.json on branch deployments: $($inFlight.Count) in flight, as in Octopus; $($listed.Count - $inFlight.Count) ended in the last half hour$says"
     }
+    'CAP-090' = {
+        # The system's own checks (infra/own/test-*.ps1) run in job own of the capability run, as the plan identity alone.
+        $workflow = Get-RepoFile $systemRepo '.github/workflows/capabilities.yml'
+        $job = [regex]::Match($workflow, '(?ms)^  own:\r?\n(.*?)(?=^  \S|\z)').Groups[1].Value
+        Assert-That ($job -match '(?m)^    environment: azure-read\r?$' -and $job -match 'client-id: \$\{\{ vars\.AZURE_CLIENT_ID_PLAN \}\}' -and $job -match '\./scripts/test-own\.ps1') 'capabilities.yml has no job own that runs scripts/test-own.ps1 in environment azure-read as the plan identity'
+        Assert-That ($workflow -match '(?m)^    needs: \[capabilities, own\]\r?$') 'no job of capabilities.yml takes the result of job own into the issue labelled capability'
+        $plan = "id-$slug-plan"
+        $planGroup = [string] $system.azure.resourceGroups.nonprod
+        $subjects = @(az identity federated-credential list --identity-name $plan --resource-group $planGroup --query '[].subject' --output tsv)
+        Assert-That (@($subjects | Where-Object { $_ -like '*:environment:azure-read' }).Count -gt 0) "$plan does not trust environment azure-read of the system repository"
+        Assert-That (@(gh api "repos/$systemRepo/contents/scripts" --jq '.[].name') -contains 'test-own.ps1') 'the system repository has no scripts/test-own.ps1'
+        Assert-That ((Get-RepoFile $systemRepo 'scripts/test-own.ps1') -match 'SKIP own: no infra/own/test-\*\.ps1') 'scripts/test-own.ps1 does not say SKIP for a system without checks of its own'
+        # A system without checks of its own, or without infra/own (runtime aks-argocd), is not behind: GitHub answers 404.
+        $PSNativeCommandUseErrorActionPreference = $false
+        $listed = @(gh api "repos/$systemRepo/contents/infra/own" --jq '.[].name' 2>&1 | ForEach-Object { "$_" })
+        $code = $LASTEXITCODE
+        $PSNativeCommandUseErrorActionPreference = $true
+        if ($code -ne 0 -and ($listed -join ' ') -notmatch 'HTTP 404') { throw "cannot list infra/own of ${systemRepo}: $($listed -join ' ')" }
+        $own = @(if ($code -eq 0) { $listed | Where-Object { $_ -cmatch '^test-.*\.ps1$' } })
+        if ($own.Count -eq 0) { return "job own in azure-read as $plan; no infra/own/test-*.ps1, so it says SKIP own" }
+        "job own runs $($own -join ', ') in $($environments -join ', '), in azure-read as $plan"
+    }
+    'CAP-091' = {
+        # The database's tables are recorded at each deployment, and the dashboard draws them (decision 0040).
+        if ($system.system['databaseView'] -eq $false) { Skip-Check 'system.json switches the database view off ("databaseView": false)' }
+        $migrating = @($system.deployables | Where-Object { $_['databasePackage'] })
+        if ($migrating.Count -eq 0) { Skip-Check 'no deployable migrates a database (databasePackage)' }
+        foreach ($d in $migrating) {
+            $names = @(Get-ProcessStep "$slug-$([string] $d.name)" | ForEach-Object { [string] $_.Name })
+            Assert-That ($names -contains 'Record database schema') "the process of $slug-$([string] $d.name) has no step Record database schema: run the system workflow, which applies octopus/"
+            Assert-That ($names.IndexOf('Migrate database') -lt $names.IndexOf('Record database schema')) "Record database schema of $slug-$([string] $d.name) does not stand after Migrate database"
+        }
+        # A record is there from the first deployment after the step: an environment without one is not behind.
+        $recorded = [ordered] @{}
+        foreach ($e in $environments) {
+            $text = Find-RepoFile $systemRepo "environments/$e/database.json"
+            if (-not $text) { continue }
+            $record = try { $text | ConvertFrom-Json -AsHashtable -NoEnumerate } catch { $null }
+            Assert-That ($record -is [System.Collections.IDictionary] -and @($record['tables'] | Where-Object { $_ -is [System.Collections.IDictionary] -and $_['name'] }).Count -gt 0) "environments/$e/database.json on main names no table: deploy a release of $slug-$([string] $migrating[0].name) to $e again"
+            $recorded[$e] = @($record['tables']).Count
+        }
+        if ($recorded.Count -eq 0) { return "step Record database schema in $(@($migrating | ForEach-Object { "$slug-$([string] $_.name)" }) -join ', '); no environment has a record yet (the next deployment writes it)" }
+        "tables recorded in $(@($recorded.Keys | ForEach-Object { "$_ ($($recorded[$_]))" }) -join ', '); the dashboard draws them at its next deployment"
+    }
+    'CAP-092' = {
+        # Every application's repository publishes the logical architecture of its releases (decision 0041).
+        if ($system.system['applicationView'] -eq $false) { Skip-Check 'system.json switches the application view off ("applicationView": false)' }
+        $applications = @($system.deployables | Where-Object { $_['repository'] -and $_['hosting'] -notin 'staticsite', 'staticwebapp', 'storagewebsite' })
+        if ($applications.Count -eq 0) { Skip-Check 'no deployable but the dashboard names a repository' }
+        $organization = [string] $system.system.githubOrg
+        $published = @(foreach ($d in $applications) {
+                $repo = "$organization/$([string] $d.repository)"
+                # The page reads the architecture as anyone does, from the repository's public address: a repository
+                # the public cannot read has no application view, and that is its owner's choice, not a failure
+                # (cmdemo1-scorecard, 2026-10-12). Asked without a credential, as the dashboard's deployment asks.
+                $visible = 0
+                try { $visible = [int] (Invoke-WebRequest -Uri "https://github.com/$repo" -Method Head -TimeoutSec 30 -SkipHttpErrorCheck -MaximumRedirection 0 -ErrorAction Stop).StatusCode } catch { $visible = 0 }
+                if ($visible -eq 404) { "$([string] $d.name) (private repository: no application view)"; continue }
+                # A repository takes the view by taking the workflow: one without it has no application view and is
+                # not behind (Jeffrey, 2026-10-13, on jpcom, whose website's repository is not the kit's to change).
+                if (-not (Find-RepoFile $repo '.github/workflows/architecture.yml')) { "$([string] $d.name) (no workflow Architecture: no application view)"; continue }
+                Assert-That ([bool] (Find-RepoFile $repo '.github/architecture/write-architecture.ps1')) "$repo has no .github/architecture/write-architecture.ps1, which its workflow Architecture runs: run sync-app-workflows.ps1 and merge its pull request"
+                # A repository that has not built since it got the workflow has no branch yet: it is not behind.
+                $PSNativeCommandUseErrorActionPreference = $false
+                $listed = @(gh api "repos/$repo/contents/$([string] $d.name)?ref=architecture" --jq '.[].name' 2>&1 | ForEach-Object { "$_" })
+                $code = $LASTEXITCODE
+                $PSNativeCommandUseErrorActionPreference = $true
+                if ($code -ne 0 -and ($listed -join ' ') -notmatch 'HTTP 404') { throw "cannot list branch architecture of ${repo}: $($listed -join ' ')" }
+                $versions = @(if ($code -eq 0) { $listed | Where-Object { $_ -cmatch '\.svg$' } })
+                "$([string] $d.name) ($($versions.Count))"
+            })
+        "application view, released versions with a diagram: $($published -join ', ')"
+    }
 }
 
 
@@ -848,8 +985,11 @@ function Write-Check([hashtable] $Check, [string] $Note = '') {
 
 if (-not (Wait-QuietSpace $WaitMinutes)) {
     if ($WaitOnly) { Write-Host "Octopus is still busy after $WaitMinutes minutes; the checks wait on."; exit 0 }
-    Write-Fail "the space did not become quiet in $WaitMinutes minutes"
-    exit 1
+    # Not a failure: a system that is deploying is not a system that lacks a capability (jpcom, 2026-10-13: its site's
+    # deployments take longer than the wait, and the run reported a failure without checking anything). The line
+    # starts with NOT CHECKED, which workflow capabilities reads: it then leaves the capability issue as it is.
+    Write-Host "NOT CHECKED: Octopus did not become quiet in $WaitMinutes minutes (deployments or runbook runs are in flight). No capability was checked, and this run says nothing about any; the next run checks."
+    exit 0
 }
 if ($WaitOnly) {
     Write-Host 'Octopus is quiet.'

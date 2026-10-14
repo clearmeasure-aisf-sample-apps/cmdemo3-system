@@ -47,6 +47,9 @@ locals {
 
   # Only deployables with a databasePackage own the database: they migrate it.
   migrated_deployables = { for name, d in local.deployables : name => d if try(d.databasePackage, "") != "" }
+  # The deployables whose deployment records the database's tables for the dashboard's database view (decision 0040):
+  # those that migrate it, unless the system switched the view off ("databaseView": false on "system").
+  schema_deployables = try(local.system.system.databaseView, true) == false ? {} : local.migrated_deployables
   # Environments whose app deployments run the acceptance tests (system.json environments[].acceptanceTests), and the
   # deployables that ship an acceptance-test package (deployables[].acceptanceTestsPackage).
   test_environments = [for name, e in local.environments : name if try(e.acceptanceTests, false)]

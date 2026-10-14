@@ -14,10 +14,12 @@ var slug = system.system.slug
 resource aks 'Microsoft.ContainerService/managedClusters@2025-05-01' = {
   name: system.cluster.name
   location: system.system.location
+  // The environments it serves, as a list: the runtime diagram draws it in each of them.
   tags: {
     system: slug
     purpose: 'demo'
     tier: 'cluster'
+    environment: join(map(system.environments, e => e.name), ',')
   }
   sku: {
     name: 'Base'
