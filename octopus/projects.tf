@@ -163,7 +163,7 @@ resource "octopusdeploy_process_step" "sign_off" {
   execution_properties = {
     "Octopus.Action.RunOnServer"                       = "false"
     "Octopus.Action.Manual.Instructions"               = "Sign off #{Octopus.Project.Name} #{Octopus.Release.Number} for #{Octopus.Environment.Name}: check the earlier environments, then Proceed with a note, or Abort."
-    "Octopus.Action.Manual.ResponsibleTeamIds"         = local.sign_off_team_id
+    "Octopus.Action.Manual.ResponsibleTeamIds"         = local.sign_off_team_ids[each.key]
     "Octopus.Action.Manual.BlockConcurrentDeployments" = "False"
   }
 }
@@ -241,6 +241,26 @@ resource "octopusdeploy_process_step" "seed_demo_employees" {
 
   execution_properties = merge(local.script_properties, {
     "Octopus.Action.Script.ScriptBody" = file("${path.module}/../scripts/seed-demo-employees.ps1")
+  })
+}
+
+# The tables of the database as they are after the migration and the seeder (columns, keys, references, row counts) go
+# to environments/<env>/database.json on main, which the dashboard's database view is drawn from (decision 0040). A
+# step of its own: it receives the GitHub credential (github.tf, token_steps), has no package and runs nothing of the
+# application's; the names it reads from the database are text it checks before it commits
+# (scripts/record-database-schema.ps1, the file of templates/system: shared-files.txt). On the worker in the cluster,
+# where SQL Server is reachable.
+resource "octopusdeploy_process_step" "record_schema" {
+  for_each = local.schema_deployables
+
+  process_id     = octopusdeploy_process.deployable[each.key].id
+  name           = "Record database schema"
+  type           = "Octopus.Script"
+  worker_pool_id = local.cluster_worker_pool_id
+  container      = local.container
+
+  execution_properties = merge(local.script_properties, {
+    "Octopus.Action.Script.ScriptBody" = join("\n", [local.github_token_functions, file("${path.module}/../scripts/record-database-schema.ps1")])
   })
 }
 
@@ -488,6 +508,7 @@ resource "octopusdeploy_process_steps_order" "deployable" {
     contains(keys(local.migrated_deployables), each.key) ? [octopusdeploy_process_step.migrate[each.key].id] : [],
     contains(keys(local.tested_deployables), each.key) ? [octopusdeploy_process_step.prepare_tests[each.key].id] : [],
     contains(keys(local.seeded_deployables), each.key) ? [octopusdeploy_process_step.seed_demo_employees[each.key].id] : [],
+    contains(keys(local.schema_deployables), each.key) ? [octopusdeploy_process_step.record_schema[each.key].id] : [],
     [
       octopusdeploy_process_step.update[each.key].id,
       octopusdeploy_process_step.measure[each.key].id,

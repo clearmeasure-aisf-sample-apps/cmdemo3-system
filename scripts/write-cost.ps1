@@ -146,6 +146,16 @@ function Write-Fail { param([string] $Message) Write-Host "FAIL $Message" }
 function Write-Skip { param([string] $Message) Write-Host "SKIP $Message" }
 function Format-Day([datetime] $Day) { $Day.ToString('yyyy-MM-dd', [cultureinfo]::InvariantCulture) }
 function Format-Amount($Amount) { ([double] $Amount).ToString('0.00', [cultureinfo]::InvariantCulture) }
+function Get-CostEntry([string] $Tag, [string[]] $Environment, [string] $Shared) {
+    # The entry a cost row belongs to, by the tag "environment" of its resource. The tag is a set (decision 0037): a
+    # resource that serves several environments names them all ("tdd,uat"), and what several environments share is
+    # "shared", like what carries no tag. One name: that environment of system.json (whatever its case), or the name
+    # itself when the system has no such environment.
+    $named = @("$Tag" -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique)
+    if ($named.Count -ne 1) { return $Shared }
+    $known = @($Environment | Where-Object { $_ -eq $named[0] })
+    if ($known.Count -gt 0) { $known[0] } else { $named[0] }
+}
 
 # The groups, each with the tier it belongs to ('' for a group of no tier: the edge group, a cluster's group).
 $groups = [ordered] @{}
@@ -360,12 +370,10 @@ if ($read.Count -eq 0) {
 }
 
 # Each row belongs to one entry: an environment of system.json (the tag, whatever its case), another value of the tag
-# under its own name, or "shared" without one.
+# under its own name, or "shared" without one or with a tag that names several environments (Get-CostEntry).
 $entryOf = {
     param([string] $Tag)
-    if (-not $Tag) { return $shared }
-    $known = @($environments | Where-Object { $_ -eq $Tag })
-    if ($known.Count -gt 0) { $known[0] } else { $Tag }
+    Get-CostEntry -Tag $Tag -Environment @($environments) -Shared $shared
 }
 $rows = @(foreach ($group in $read.Keys) { foreach ($row in $read[$group]) { $row } })
 $currencies = @($rows | ForEach-Object { $_.Currency } | Where-Object { $_ } | Sort-Object -Unique)

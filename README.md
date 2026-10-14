@@ -57,7 +57,13 @@ the AKS service to branch `cluster-status` several times an hour, and after ever
 demo-environment kit's `docs/capabilities.md`, section "Runtime aks-argocd"). Workflow `capabilities` runs it at the
 end of every `system` build and every night, as the system's own identities, and keeps an issue labelled `capability`
 open while a check fails. The checks do not enter the cluster: they read Git, Octopus (the Argo CD instance's health,
-the deployments and their logs), Azure as a reader, and the answers of the apps.
+the deployments and their logs), Azure as a reader, and the answers of the apps. Checks of this system's own go in
+`infra/own/test-<name>.ps1`, which no template sync changes: job `own` of the same workflow runs each one nightly
+and after every `system` build, in every environment with `-Environment <name>`, as `id-<slug>-plan`, ten minutes
+at most a run. No run starts once 45 minutes have passed since `scripts/test-own.ps1` started, so the last one ends
+within the job's hour; a run not started fails, and a failure keeps the same issue open. By hand, from the
+repository's root: `pwsh -NoProfile -File scripts/test-own.ps1`, or for one
+`pwsh -NoProfile -File infra/own/test-<name>.ps1 -Environment <env>`, as whoever `az` is signed in as.
 
 ## After changing system.json
 

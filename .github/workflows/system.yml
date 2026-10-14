@@ -1,5 +1,6 @@
 # The system pipeline (runtime aks-argocd). Every merge to main, except a commit of Octopus (which changes only
-# gitops/environments/) and a documentation change under docs/ or in Markdown:
+# gitops/environments/, or environments/*/database.json: the tables a deployment read from the database) and a
+# documentation change under docs/ or in Markdown:
 #   1. octopus-apply   configures Octopus from octopus/ and system.json (environments, lifecycle, feeds, the worker
 #                      pool, the Git credential, projects)
 #   2. cluster-apply   applies infra/cluster.bicep (the one AKS cluster), installs Argo CD with the root Application,
@@ -24,6 +25,7 @@ on:
     branches: [main]
     paths-ignore:
       - "gitops/environments/**"
+      - "environments/*/database.json"
       - "**/*.md"
       - "docs/**"
   workflow_dispatch:

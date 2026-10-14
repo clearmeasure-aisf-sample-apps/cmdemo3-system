@@ -51,6 +51,16 @@ $PSNativeCommandArgumentPassing = 'Standard'
 $PSNativeCommandUseErrorActionPreference = $true
 $ProgressPreference = 'SilentlyContinue'
 
+# An Azure step can drop the result message of Fail-Step (exit code 255, no reason): the reason is a plain line too.
+$octopusFailStep = if (Test-Path -LiteralPath function:Fail-Step) { ${function:Fail-Step} } else { $null }
+function Fail-Step {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseApprovedVerbs', '')]
+    param([string] $Message)
+    Write-Host $Message
+    if ($octopusFailStep) { & $octopusFailStep $Message }
+    exit -1
+}
+
 # PlantUML, at a fixed version, for the runtime diagrams: the release jar of github.com/plantuml/plantuml, checked
 # against this SHA-256 before it runs. The dashboard finds the drawn elements by attributes of PlantUML's SVG that are
 # not a documented contract (they changed in 1.2026.3 and 1.2026.4), so a new version is a change of this script,
@@ -315,7 +325,9 @@ function ConvertTo-ClusterDiagram {
         [Parameter(Mandatory)] [hashtable] $System,
         [Parameter(Mandatory)] [System.Collections.IDictionary] $Topology,
         [Parameter(Mandatory)] [string] $Environment,
-        [hashtable] $DashboardUrl = @{}
+        [hashtable] $DashboardUrl = @{},
+        # Repositories of deployables that the public cannot read: their boxes name no architecture (decision 0041).
+        [string[]] $PrivateRepository = @()
     )
     $slug = [string] $System.system.slug
     $entry = @($System.environments | Where-Object { [string] $_.name -eq $Environment }) | Select-Object -First 1
@@ -492,6 +504,24 @@ function ConvertTo-ClusterDiagram {
     $regionLinks = Get-PortalLink $clusterId 'namespaces' 'namespaces'
     if ($regionLinks) { $region.links = $regionLinks }
 
+    # The application view (decision 0041): an app's box says where the repository of its deployable publishes the
+    # logical architecture of each release (branch "architecture", workflow Architecture of templates/app), and the
+    # page zooms from the box into the diagram of the version that runs. Only for a deployable that names its
+    # repository, with names GitHub allows, and whose repository the public can read; "applicationView": false on
+    # "system" leaves it out.
+    $organization = [string] $System.system['githubOrg']
+    if ($System.system['applicationView'] -ne $false -and $organization -cmatch '^[A-Za-z0-9][A-Za-z0-9-]{0,38}$') {
+        $repositoryOf = @{}
+        foreach ($declared in @($System.deployables | Where-Object { $_ -is [System.Collections.IDictionary] })) {
+            if ([string] $declared['name'] -cmatch '^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$' -and [string] $declared['repository'] -cmatch '^[A-Za-z0-9._-]{1,100}$' -and [string] $declared['repository'] -notin '.', '..' -and $PrivateRepository -inotcontains [string] $declared['repository']) {
+                $repositoryOf[[string] $declared['name']] = [string] $declared['repository']
+            }
+        }
+        foreach ($node in @($nodes | Where-Object { $_['kind'] -eq 'webapp' -and $_.Contains('deployable') -and $repositoryOf.ContainsKey([string] $_['deployable']) })) {
+            $node.architecture = "https://raw.githubusercontent.com/$organization/$($repositoryOf[[string] $node['deployable']])/architecture/$([string] $node['deployable'])"
+        }
+    }
+
     return [ordered] @{
         puml     = ($lines -join "`n") + "`n"
         manifest = [ordered] @{
@@ -548,6 +578,240 @@ function Test-RuntimeSvg {
     return @($missing)
 }
 
+function ConvertTo-DatabaseDiagram {
+    # The database view of one environment (decision 0040): PlantUML source (C4, a box per table with its row count
+    # and its columns, an arrow per pair of tables a foreign key joins) and the manifest that tells the dashboard
+    # which drawn element is which. It asks nothing: the same record gives the same diagram.
+    #
+    # Input: the record step "Record database schema" committed to environments/<env>/database.json (parsed, as a
+    # hashtable). The names in it are what an application called its tables and columns, and the file may be older
+    # than the step's rules or written by hand, so nothing of it is trusted: a name is written with letters, digits,
+    # space and . _ - only (a type also with its length in brackets, "nvarchar(50)", "decimal(18,2)"), every other
+    # character as "_", and cut at its length; a
+    # value of the wrong type is left out. Returns $null for a record without a table.
+    #
+    # A table's alias is "t_<schema>_<name>" with every character outside A-Z a-z 0-9 _ as "_" (a second table that
+    # comes to the same alias gets "_2"), its qualified name "db.<alias>". The row count is a line of its own,
+    # "<count> rows" with thousands separators and a no-break space (U+00A0) for the space: the page finds that text and
+    # replaces it with the count of the last deployment. A relationship has the id "<from>-to-<to>"; several foreign keys between the same two tables are
+    # one arrow that names the columns of each.
+    param(
+        [Parameter(Mandatory)] [System.Collections.IDictionary] $Record,
+        [Parameter(Mandatory)] [string] $Environment,
+        [string] $Source = '',
+        [int] $MostTables = 120,
+        [int] $MostColumns = 60
+    )
+    function Get-Name { param([AllowNull()] [string] $Text, [int] $Longest = 128) $plain = ("$Text" -replace '[^\p{L}\p{Nd} ._-]', '_').Trim(); if ($plain.Length -gt $Longest) { $plain.Substring(0, $Longest) } else { $plain } }
+    # A type keeps ( ) and , only in the one form a type has them, "name(50)", "name(max)" or "name(18,2)": PlantUML's
+    # preprocessor reads brackets and commas inside a quoted text too, and one that does not close ends the diagram.
+    function Get-Type {
+        param([AllowNull()] [string] $Text)
+        $plain = "$Text".Trim()
+        if ($plain -cnotmatch '^[A-Za-z0-9_ ]+(\((max|[0-9]+)(,[0-9]+)?\))?$') { $plain = $plain -replace '[^A-Za-z0-9 _]', '_' }
+        if ($plain.Length -gt 64) { $plain.Substring(0, 64) } else { $plain }
+    }
+    function Get-Count { param([long] $Rows) if ($Rows -eq 1) { '1 row' } else { $Rows.ToString('N0', [cultureinfo]::InvariantCulture) + ' rows' } }
+
+    $listed = @($Record['tables'] | Where-Object { $_ -is [System.Collections.IDictionary] -and "$($_['name'])".Trim() })
+    if ($listed.Count -eq 0) { return $null }
+    $truncated = $Record['truncated'] -eq $true -or $listed.Count -gt $MostTables
+    $database = Get-Name ([string] $Record['database'])
+    if (-not $database) { $database = 'database' }
+
+    $lines = [Collections.Generic.List[string]]::new()
+    $lines.Add('@startuml')
+    # PlantUML's own layout engine: the worker container has no Graphviz, and without it PlantUML draws an error.
+    $lines.Add('!pragma layout smetana')
+    $lines.Add('!include <C4/C4_Component>')
+    $lines.Add('HIDE_STEREOTYPE()')
+    $lines.Add('skinparam wrapWidth 900')
+    $lines.Add('skinparam maxMessageSize 300')
+    $lines.Add('skinparam nodesep 40')
+    $lines.Add('skinparam ranksep 60')
+    $lines.Add('UpdateElementStyle("component", $bgColor="#eceff1", $fontColor="#1c2b33", $borderColor="#455a64")')
+    $lines.Add("Boundary(db, `"$database`", `"SQL Server database, $(Get-Name $Environment 64)`") {")
+
+    $tables = [Collections.Generic.List[object]]::new()
+    $aliasOf = @{}
+    $used = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($table in @($listed | Select-Object -First $MostTables)) {
+        $schema = Get-Name ([string] $table['schema'])
+        $name = Get-Name ([string] $table['name'])
+        $alias = ("t_${schema}_$name" -replace '[^A-Za-z0-9_]', '_')
+        for ($again = 2; -not $used.Add($alias); $again++) { $alias = ("t_${schema}_$name" -replace '[^A-Za-z0-9_]', '_') + "_$again" }
+        $aliasOf["$schema.$name"] = $alias
+        $rows = 0L
+        $null = [long]::TryParse("$($table['rows'])", [ref] $rows)
+        if ($rows -lt 0) { $rows = 0 }
+        $columns = @($table['columns'] | Where-Object { $_ -is [System.Collections.IDictionary] -and "$($_['name'])".Trim() })
+        $text = [Collections.Generic.List[string]]::new()
+        $text.Add((Get-Count $rows))
+        foreach ($column in @($columns | Select-Object -First $MostColumns)) {
+            $marks = @(@("$($column['key'])" -split ',' | ForEach-Object { $_.Trim().ToUpperInvariant() } | Where-Object { $_ -in 'PK', 'FK' } | Select-Object -Unique); if ($column['nullable'] -eq $true) { 'null' })
+            $text.Add("$(Get-Name ([string] $column['name'])) : $(Get-Type ([string] $column['type']))$(if ($marks.Count -gt 0) { " - $($marks -join ', ')" })")
+        }
+        $more = 0
+        $null = [int]::TryParse("$($table['moreColumns'])", [ref] $more)
+        $left = [Math]::Max(0, $columns.Count - $MostColumns) + [Math]::Max(0, $more)
+        if ($left -gt 0) { $text.Add("and $left more column$(if ($left -ne 1) { 's' })") }
+        $label = if ($schema -and $schema -ne 'dbo') { "$schema.$name" } else { $name }
+        # PlantUML writes a <text> per word. A line whose words are joined by no-break spaces is one word, so one
+        # <text>: the page finds the row count as one element, and the SVG is a fifth of the size.
+        $lines.Add("  Component($alias, `"$label`", `$descr=`"$(@($text | ForEach-Object { $_ -replace ' ', [string] [char] 0xA0 }) -join '\n')`")")
+        $tables.Add([ordered] @{ alias = $alias; qualifiedName = "db.$alias"; schema = $schema; name = $name; rows = $rows; columns = $columns.Count + [Math]::Max(0, $more) })
+    }
+    $lines.Add('}')
+
+    $references = [ordered] @{}
+    foreach ($reference in @($Record['references'] | Where-Object { $_ -is [System.Collections.IDictionary] })) {
+        $fromName = @("$($reference['from'])" -split '\.', 2 | ForEach-Object { Get-Name $_ }) -join '.'
+        $toName = @("$($reference['to'])" -split '\.', 2 | ForEach-Object { Get-Name $_ }) -join '.'
+        $from = $aliasOf[$fromName]
+        $to = $aliasOf[$toName]
+        if (-not $from -or -not $to) { continue }
+        $id = "$from-to-$to"
+        if (-not $references.Contains($id)) { $references[$id] = [ordered] @{ id = $id; from = $from; to = $to; name = ''; columns = [Collections.Generic.List[string]]::new() } }
+        $entry = $references[$id]
+        $constraint = Get-Name ([string] $reference['name'])
+        if ($constraint) { $entry.name = if ($entry.name) { "$($entry.name), $constraint" } else { $constraint } }
+        foreach ($column in @($reference['columns'] | Where-Object { "$_".Trim() } | Select-Object -First 16)) { $entry.columns.Add((Get-Name ([string] $column))) }
+    }
+    foreach ($entry in $references.Values) {
+        $label = (@($entry.columns | Select-Object -First 6) -join ', ') + $(if ($entry.columns.Count -gt 6) { ', ...' })
+        $lines.Add("Rel($($entry.from), $($entry.to), `"$label`")")
+    }
+    $lines.Add('@enduml')
+
+    $readAt = ''
+    $parsed = [datetime]::MinValue
+    $generated = $Record['generated']
+    if ($generated -is [datetime]) { $readAt = ([datetime] $generated).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ', [cultureinfo]::InvariantCulture) }
+    elseif ([datetime]::TryParse("$generated", [cultureinfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal -bor [Globalization.DateTimeStyles]::AssumeUniversal, [ref] $parsed)) {
+        $readAt = $parsed.ToString('yyyy-MM-ddTHH:mm:ssZ', [cultureinfo]::InvariantCulture)
+    }
+    return [ordered] @{
+        puml     = ($lines -join "`n") + "`n"
+        manifest = [ordered] @{
+            environment = $Environment
+            database    = $database
+            readAt      = $readAt
+            source      = $Source
+            truncated   = [bool] $truncated
+            drawn       = $tables.Count
+            tables      = @($tables)
+            references  = @($references.Values)
+        }
+    }
+}
+
+function Test-DatabaseSvg {
+    # The handles the dashboard relies on in a rendered database view: one <g class="entity"> per table, by its
+    # qualified name, with one <text> that is exactly its row count. Returns what is missing, as text.
+    param(
+        [Parameter(Mandatory)] [string] $Svg,
+        [Parameter(Mandatory)] [System.Collections.IDictionary] $Manifest
+    )
+    $document = [xml] $Svg
+    $entities = @{}
+    foreach ($group in @($document.SelectNodes("//*[local-name()='g'][@class='entity'][@data-qualified-name]"))) {
+        # The words of a line are joined by no-break spaces (ConvertTo-DatabaseDiagram): read as spaces here.
+        $entities[$group.GetAttribute('data-qualified-name')] = @($group.SelectNodes(".//*[local-name()='text']") | ForEach-Object { ("$($_.InnerText)" -replace [string] [char] 0xA0, ' ').Trim() })
+    }
+    $missing = [Collections.Generic.List[string]]::new()
+    foreach ($table in $Manifest.tables) {
+        $count = if ([long] $table.rows -eq 1) { '1 row' } else { ([long] $table.rows).ToString('N0', [cultureinfo]::InvariantCulture) + ' rows' }
+        if (-not $entities.ContainsKey($table.qualifiedName)) { $missing.Add("table $($table.qualifiedName)") }
+        elseif (@($entities[$table.qualifiedName] | Where-Object { $_ -ceq $count }).Count -ne 1) { $missing.Add("row count of $($table.qualifiedName)") }
+    }
+    return @($missing)
+}
+
+function Write-DatabaseDiagram {
+    # runtime/<env>.database.puml, .svg and .json in the site folder for every environment that has a record, and the
+    # entry "database" of that environment in runtime/index.json, which Write-RuntimeDiagram wrote before. One Java
+    # process of its own renders them, in PlantUML's most restrictive security profile. A record that cannot be drawn
+    # does not stop the dashboard's deployment: the names in it are an application's, and a page without the database
+    # view is better than no page. Returns the count, the timings and, for what was left out, why.
+    param(
+        [Parameter(Mandatory)] [hashtable] $Record,
+        [Parameter(Mandatory)] [string] $Folder,
+        [Parameter(Mandatory)] [string] $Jar,
+        [Parameter(Mandatory)] [string] $Version,
+        [Parameter(Mandatory)] [string] $Repository
+    )
+    $runtime = Join-Path $Folder 'runtime'
+    $indexPath = Join-Path $runtime 'index.json'
+    $result = [ordered] @{ count = 0; seconds = 0.0; kilobytes = 0.0; problems = [Collections.Generic.List[string]]::new() }
+    $diagrams = [ordered] @{}
+    foreach ($name in @($Record.Keys | Sort-Object)) {
+        if ($Record[$name] -isnot [System.Collections.IDictionary]) { continue }
+        try {
+            $diagram = ConvertTo-DatabaseDiagram -Record $Record[$name] -Environment $name -Source "https://raw.githubusercontent.com/$Repository/main/environments/$name/database.json"
+            if (-not $diagram) { continue }
+            $diagram.manifest.plantuml = $Version
+            $diagrams[$name] = $diagram
+            Set-Content -LiteralPath (Join-Path $runtime "$name.database.puml") -Value $diagram.puml -Encoding utf8NoBOM -NoNewline
+        }
+        catch { $result.problems.Add("${name}: $($_.Exception.Message)") }
+    }
+    if ($diagrams.Count -eq 0) { return $result }
+
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    $sources = @($diagrams.Keys | ForEach-Object { Join-Path $runtime "$_.database.puml" })
+    $env:PLANTUML_SECURITY_PROFILE = 'SANDBOX'
+    $PSNativeCommandUseErrorActionPreference = $false
+    $output = @(java '-Djava.awt.headless=true' -jar $Jar -tsvg -charset UTF-8 -nometadata @sources 2>&1 | ForEach-Object { "$_".TrimEnd() } | Where-Object { $_ })
+    $code = $LASTEXITCODE
+    $PSNativeCommandUseErrorActionPreference = $true
+    $result.seconds = $clock.Elapsed.TotalSeconds
+
+    $index = Get-Content -LiteralPath $indexPath -Raw | ConvertFrom-Json -AsHashtable
+    # The time is text in the file and stays the same text.
+    if ($index['generated'] -is [datetime]) { $index['generated'] = ([datetime] $index['generated']).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ', [cultureinfo]::InvariantCulture) }
+    foreach ($name in $diagrams.Keys) {
+        $svgPath = Join-Path $runtime "$name.database.svg"
+        $problem = $null
+        if (-not (Test-Path -LiteralPath $svgPath)) { $problem = "PlantUML wrote no $name.database.svg (exit code $code$(if ($output.Count -gt 0) { ": $($output[0])" }))" }
+        else {
+            $svg = Get-Content -LiteralPath $svgPath -Raw
+            # PlantUML draws its error into the picture: then the tables are not in it.
+            $missing = @(try { Test-DatabaseSvg -Svg $svg -Manifest $diagrams[$name].manifest } catch { "the SVG is not read ($($_.Exception.Message))" })
+            if ($missing.Count -gt 0) { $problem = "the rendered view lacks $(@($missing | Select-Object -First 3) -join ', ')$(if ($missing.Count -gt 3) { " and $($missing.Count - 3) more" })" }
+        }
+        if ($problem) {
+            $result.problems.Add("${name}: $problem")
+            Remove-Item -LiteralPath $svgPath -Force -ErrorAction SilentlyContinue
+            continue
+        }
+        ($diagrams[$name].manifest | ConvertTo-Json -Depth 8) + "`n" | Set-Content -LiteralPath (Join-Path $runtime "$name.database.json") -Encoding utf8NoBOM -NoNewline
+        foreach ($entry in @($index['environments'] | Where-Object { $_ -is [System.Collections.IDictionary] -and [string] $_['name'] -eq $name })) {
+            $entry['database'] = [ordered] @{ manifest = "$name.database.json"; svg = "$name.database.svg" }
+        }
+        $result.count++
+        $result.kilobytes += (Get-Item -LiteralPath $svgPath).Length / 1KB
+    }
+    ($index | ConvertTo-Json -Depth 5) + "`n" | Set-Content -LiteralPath $indexPath -Encoding utf8NoBOM -NoNewline
+    return $result
+}
+
+function Find-PrivateRepository {
+    # The repositories of the system's applications that the public cannot read, by name: the page reads an
+    # application's architecture from its repository's public address, so a private one has no application view.
+    # Asked as anyone asks, with no credential: github.com answers 200 for a public repository and 404 for one that is
+    # private or does not exist. Any other answer, and no answer, tells nothing: the repository is then taken as
+    # public, and its view says that no diagram is published.
+    param([Parameter(Mandatory)] [hashtable] $System)
+    $organization = [string] $System.system['githubOrg']
+    if ($organization -cnotmatch '^[A-Za-z0-9][A-Za-z0-9-]{0,38}$') { return @() }
+    $names = @($System.deployables | Where-Object { $_ -is [System.Collections.IDictionary] -and $_['hosting'] -notin 'staticwebapp', 'storagewebsite' -and [string] $_['repository'] -cmatch '^[A-Za-z0-9._-]{1,100}$' -and [string] $_['repository'] -notin '.', '..' } | ForEach-Object { [string] $_['repository'] } | Select-Object -Unique)
+    return @(foreach ($name in $names) {
+            $status = 0
+            try { $status = [int] (Invoke-WebRequest -Uri "https://github.com/$organization/$name" -Method Head -TimeoutSec 30 -SkipHttpErrorCheck -MaximumRedirection 0 -ErrorAction Stop).StatusCode } catch { $status = 0 }
+            if ($status -eq 404) { $name }
+        })
+}
+
 function Get-PlantUmlJar {
     # The PlantUML release jar of the pinned version, from the project's GitHub releases, into the folder; it fails when
     # its SHA-256 is not the pinned one. Returns the path and the seconds the download took.
@@ -581,7 +845,8 @@ function Write-RuntimeDiagram {
         [Parameter(Mandatory)] [string] $Folder,
         [Parameter(Mandatory)] [string] $Jar,
         [Parameter(Mandatory)] [string] $Version,
-        [hashtable] $DashboardUrl = @{}
+        [hashtable] $DashboardUrl = @{},
+        [string[]] $PrivateRepository = @()
     )
     # A folder of this run only: nothing of an earlier render may be left in it.
     $runtime = Join-Path $Folder 'runtime'
@@ -590,7 +855,7 @@ function Write-RuntimeDiagram {
     $diagrams = [ordered] @{}
     foreach ($environment in @($System.environments)) {
         $name = [string] $environment.name
-        $diagram = ConvertTo-ClusterDiagram -System $System -Topology $Topology -Environment $name -DashboardUrl $DashboardUrl
+        $diagram = ConvertTo-ClusterDiagram -System $System -Topology $Topology -Environment $name -DashboardUrl $DashboardUrl -PrivateRepository $PrivateRepository
         $diagram.manifest.generated = $Topology.generated
         $diagram.manifest.plantuml = $Version
         $diagrams[$name] = $diagram
@@ -802,9 +1067,46 @@ $files = [ordered] @{ 'topology.json' = ($topology | ConvertTo-Json -Depth 10) }
 try {
     $jar = Get-PlantUmlJar -Version $plantUmlVersion -Sha256 $plantUmlSha256 -Folder $tools
     Write-Host ('PlantUML {0} downloaded from GitHub in {1:0.0} s ({2:0.0} MB, SHA-256 as pinned); {3}' -f $plantUmlVersion, $jar.seconds, $jar.megabytes, $javaVersion)
-    $rendered = Write-RuntimeDiagram -System $system -Topology $topology -Folder $tools -Jar $jar.path -Version $plantUmlVersion -DashboardUrl $dashboardUrls
+    $privateRepositories = @(if ($system.system['applicationView'] -ne $false) { Find-PrivateRepository -System $system })
+    if ($privateRepositories.Count -gt 0) { Write-Host "runtime/: no application view for $($privateRepositories -join ', '): the public cannot read the repository, and the page reads the architecture from its public address." }
+    $rendered = Write-RuntimeDiagram -System $system -Topology $topology -Folder $tools -Jar $jar.path -Version $plantUmlVersion -DashboardUrl $dashboardUrls -PrivateRepository $privateRepositories
     $rendered.log | ForEach-Object { Write-Host $_ }
     Write-Host ('runtime/: {0} diagram(s) rendered and checked in {1:0.0} s ({2:0} KB of SVG)' -f $rendered.count, $rendered.seconds, $rendered.kilobytes)
+
+    # The database view (decision 0040): per environment the tables step "Record database schema" last committed to
+    # environments/<env>/database.json, unless the system switched the view off. An environment without a record has
+    # no view, and its database box is as before. A record that cannot be read or drawn is one warning, not a failed
+    # deployment: the rest of the page is made.
+    if ($system.system['databaseView'] -eq $false) { Write-Host 'runtime/: no database view, system.json switches it off ("databaseView": false).' }
+    else {
+        $databaseRecords = @{}
+        $databaseProblems = [Collections.Generic.List[string]]::new()
+        foreach ($e in @($system.environments)) {
+            $recordPath = "environments/$([string] $e.name)/database.json"
+            try {
+                $recordFile = $null
+                try { $recordFile = Invoke-RestMethod -Uri "https://api.github.com/repos/$repository/contents/${recordPath}?ref=main" -Headers $headers }
+                catch {
+                    # Not every failure has a response; 404: the environment has no record yet.
+                    $response = if ($_.Exception.PSObject.Properties['Response']) { $_.Exception.Response } else { $null }
+                    if (-not $response -or [int] $response.StatusCode -ne 404) { throw }
+                }
+                if ($null -eq $recordFile) { continue }
+                $recordText = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(([string] $recordFile.content -replace '\s', '')))
+                $parsedRecord = if ($recordText.Trim()) { $recordText | ConvertFrom-Json -AsHashtable -NoEnumerate } else { $null }
+                if ($parsedRecord -is [System.Collections.IDictionary]) { $databaseRecords[[string] $e.name] = $parsedRecord }
+                else { $databaseProblems.Add("$recordPath is not a JSON object (or is larger than 1 MB)") }
+            }
+            catch { $databaseProblems.Add("$recordPath is not read ($((("$($_.Exception.Message)" -split '\r?\n')[0]).Trim()))") }
+        }
+        if ($databaseRecords.Count -eq 0 -and $databaseProblems.Count -eq 0) { Write-Host 'runtime/: no database view, no environment has a record yet (environments/<env>/database.json, written by step "Record database schema").' }
+        else {
+            $drawn = Write-DatabaseDiagram -Record $databaseRecords -Folder $tools -Jar $jar.path -Version $plantUmlVersion -Repository $repository
+            foreach ($problem in $drawn.problems) { $databaseProblems.Add($problem) }
+            Write-Host ('runtime/: {0} database view(s) rendered and checked in {1:0.0} s ({2:0} KB of SVG)' -f $drawn.count, $drawn.seconds, $drawn.kilobytes)
+        }
+        if ($databaseProblems.Count -gt 0) { Write-Warning "The database view is left out where it could not be made: $($databaseProblems -join '; '). The rest of the dashboard is deployed; the database box of those environments is as before." }
+    }
     foreach ($item in Get-ChildItem -LiteralPath (Join-Path $tools 'runtime') -File | Sort-Object Name) {
         $files["runtime-$($item.Name)"] = Get-Content -LiteralPath $item.FullName -Raw
     }
