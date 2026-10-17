@@ -412,3 +412,7 @@ $failed = $null
 try { $failed = Save-DatabaseRecord -Record $record -Token $token }
 catch { $failed = @{ Why = "the step could not finish ($($_.Exception.Message))"; Next = $again } }
 if ($failed) { Write-NotRecorded -Why $failed.Why -Next $failed.Next }
+
+# Said as an exit code: Octopus ends a step with the exit code of the last program its script ran, which may be one
+# whose refusal was expected and handled (a dormant system's resources that are gone: cmdemo2, 2026-10-15).
+exit 0
