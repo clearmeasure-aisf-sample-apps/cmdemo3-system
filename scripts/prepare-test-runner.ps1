@@ -22,3 +22,7 @@ $PSNativeCommandUseErrorActionPreference = $true
 $memoryGb = [Math]::Round(([long] ((Get-Content -LiteralPath '/proc/meminfo' | Select-String -Pattern '^MemTotal:\s+(\d+)').Matches[0].Groups[1].Value)) / 1MB, 1)
 $browsers = @(Get-ChildItem -LiteralPath ([string] $env:PLAYWRIGHT_BROWSERS_PATH) -Directory -ErrorAction SilentlyContinue | ForEach-Object Name)
 Write-Host "Worker: $([Environment]::ProcessorCount) cores, $memoryGb GB; browsers in the image: $($browsers -join ', ')"
+
+# Said as an exit code: Octopus ends a step with the exit code of the last program its script ran, which may be one
+# whose refusal was expected and handled (a dormant system's resources that are gone: cmdemo2, 2026-10-15).
+exit 0

@@ -118,3 +118,7 @@ foreach ($deployable in $deployables) {
     }
     Write-Highlight "$name of $environmentName answers at $url (image tag $tag)."
 }
+
+# Said as an exit code: Octopus ends a step with the exit code of the last program its script ran, which may be one
+# whose refusal was expected and handled (a dormant system's resources that are gone: cmdemo2, 2026-10-15).
+exit 0

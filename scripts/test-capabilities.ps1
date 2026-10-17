@@ -217,7 +217,7 @@ function Get-InsightsCount([string] $Environment, [string] $Query) {
 function Get-TelemetryState {
     # Capability "telemetry" reaches an environment with its system release: the Deployment in Git then reads Secret
     # "telemetry" under the app's own name. On: the environments where Git says so. Waiting: the ones the newest
-    # system release has not reached yet; that is promotion's matter (the fleet reports a release that stays behind),
+    # system release has not reached yet; that is promotion's matter (the platform reports a release that stays behind),
     # not a capability that fails. An environment that runs the newest release without it is a failure.
     $role = "$slug-$deployable"
     $newest = [string] @((Invoke-Octopus "/api/$space/projects/$((Get-Project $systemProject).Id)/releases?take=1").Items)[0].Version
