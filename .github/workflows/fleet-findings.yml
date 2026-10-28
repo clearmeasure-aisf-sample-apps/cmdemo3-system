@@ -1,4 +1,4 @@
-# This system checks itself against what the fleet declares (the kit's docs/fleet.md), and keeps each difference as
+# This system checks itself against what the platform declares (the kit's docs/fleet.md), and keeps each difference as
 # an issue of this repository, on its board: templates behind the kit, an environment left behind, a failed
 # deployment or workflow, a runbook not proven in time, a prod process without a sign-off or a restore point, parts
 # left on while nobody deploys. An issue is a finding for the system's owner to decide on; nothing is applied, and the
@@ -143,7 +143,7 @@ jobs:
           echo "client-id=$(jq -r '.clientId' <<<"$app")" >> "$GITHUB_OUTPUT"
 
       # Issues: the findings and their label. Contents, actions and statuses, read: test-fleet.ps1 compares this
-      # repository's files, workflow runs and commit status with what the fleet declares. The app repositories are
+      # repository's files, workflow runs and commit status with what the platform declares. The app repositories are
       # read as anyone reads a public repository. Nothing of the organization: no card on its board.
       - name: Token of the system's App
         id: app
