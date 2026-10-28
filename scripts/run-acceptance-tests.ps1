@@ -10,7 +10,8 @@
     "acceptanceTests": true (the first environment: the first time a version runs on its real Azure resources);
     octopus/projects.tf inlines this file. It runs in the Playwright image (Chromium and pwsh included) on the
     release's acceptance-test package:
-      1. .NET 10 SDK into a temporary folder (the image carries .NET 8).
+      1. The suite's Chromium when the image lacks it (the suite's Playwright is newer than the image's), with the
+         image's own pwsh and .NET 8; then the .NET 10 SDK into a temporary folder (the image carries .NET 8).
       2. The suite in remote mode (no local server, no Worker: those tests skip themselves) against the app's URL,
          with the database connection from "Open test database": every test, or only the tests of the deployable's
          acceptanceTestsFilter in system.json (AcceptanceTests.Filter, a dotnet test filter such as
@@ -47,6 +48,22 @@ $results = Join-Path (Get-Location) 'results'
 New-Item -ItemType Directory -Path $results -Force | Out-Null
 
 $clock = [Diagnostics.Stopwatch]::StartNew()
+# The suite's Chromium, before .NET 10 below: the suite's playwright.ps1 runs in a child pwsh, which is a .NET 8 app
+# (framework-dependent) and cannot start once DOTNET_ROOT points at the .NET 10 folder (cmdemo1, Playwright 1.61 on the
+# 1.54 image, 2026-10-26). Zip extraction drops the execute bit of Playwright's Node driver. A headless run uses the
+# headless shell since Playwright 1.49: both are checked, and "install chromium" brings both.
+Get-ChildItem -LiteralPath (Join-Path $package '.playwright') -Recurse -File -Force -Filter 'node' | ForEach-Object { chmod +x $_.FullName }
+$browsers = @((Get-Content -LiteralPath (Join-Path $package '.playwright' 'package' 'browsers.json') -Raw | ConvertFrom-Json).browsers)
+$revision = @($browsers | Where-Object { $_.name -eq 'chromium' })[0].revision
+$wanted = @("chromium-$revision") + @($browsers | Where-Object { $_.name -eq 'chromium-headless-shell' } | ForEach-Object { "chromium_headless_shell-$($_.revision)" })
+$absent = @($wanted | Where-Object { -not (Test-Path -LiteralPath (Join-Path ([string] $env:PLAYWRIGHT_BROWSERS_PATH) $_)) })
+if ($absent.Count -gt 0) {
+    Write-Warning "The image has no $($absent -join ', ') (the suite's Playwright version changed): installing Chromium."
+    pwsh -NoProfile -File (Join-Path $package 'playwright.ps1') install chromium
+    Write-Host "Chromium $revision installed in $([int] $clock.Elapsed.TotalSeconds) s"
+}
+
+$clock.Restart()
 $dotnetRoot = Join-Path ([IO.Path]::GetTempPath()) 'dotnet10'
 $installer = Join-Path ([IO.Path]::GetTempPath()) 'dotnet-install.sh'
 Invoke-WebRequest -Uri 'https://dot.net/v1/dotnet-install.sh' -OutFile $installer
@@ -57,32 +74,25 @@ $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
 $env:DOTNET_NOLOGO = '1'
 Write-Host ".NET $(dotnet --version) SDK in $([int] $clock.Elapsed.TotalSeconds) s"
 
+# Before the try: the data reload in finally needs the deployed environment's database, whatever failed first
+# (without it the loader falls back to SQLite and fails on its own, which hides the cause).
+$env:ApplicationBaseUrl = $baseUrl
+$env:ConnectionStrings__SqlConnectionString = $connectionString
+$env:StartLocalServer = 'false'
+$env:StartWorker = 'false'
+$env:HeadlessTestBrowser = 'true'
+$env:SkipScreenshotsForSpeed = 'true'
+$env:TEST_INPUT_DELAY_MS = [string] $OctopusParameters['AcceptanceTests.InputDelayMs']
+
 $testsExit = 1
 $loadExit = 1
 $executed = 0
 try {
-    # Zip extraction drops the execute bit of Playwright's Node driver.
-    Get-ChildItem -LiteralPath (Join-Path $package '.playwright') -Recurse -File -Force -Filter 'node' | ForEach-Object { chmod +x $_.FullName }
-    $revision = ((Get-Content -LiteralPath (Join-Path $package '.playwright' 'package' 'browsers.json') -Raw | ConvertFrom-Json).browsers |
-            Where-Object { $_.name -eq 'chromium' }).revision
-    if (-not (Test-Path -LiteralPath (Join-Path ([string] $env:PLAYWRIGHT_BROWSERS_PATH) "chromium-$revision"))) {
-        Write-Warning "The image has no Chromium $revision (the suite's Playwright version changed): installing it."
-        pwsh -NoProfile -File (Join-Path $package 'playwright.ps1') install chromium
-    }
-
     $cores = [Environment]::ProcessorCount
     $memoryGb = ([long] ((Get-Content -LiteralPath '/proc/meminfo' | Select-String -Pattern '^MemTotal:\s+(\d+)').Matches[0].Groups[1].Value)) / 1MB
     $automatic = [Math]::Max(2, [Math]::Min(16, [Math]::Min([Math]::Floor($cores * 1.5), [Math]::Floor(($memoryGb - 1) / 0.5))))
     $workers = if ($requestedWorkers -gt 0) { $requestedWorkers } else { [int] $automatic }
     Write-Highlight "Acceptance tests ($scope): $workers parallel workers ($cores cores, $([Math]::Round($memoryGb, 1)) GB) against $baseUrl"
-
-    $env:ApplicationBaseUrl = $baseUrl
-    $env:ConnectionStrings__SqlConnectionString = $connectionString
-    $env:StartLocalServer = 'false'
-    $env:StartWorker = 'false'
-    $env:HeadlessTestBrowser = 'true'
-    $env:SkipScreenshotsForSpeed = 'true'
-    $env:TEST_INPUT_DELAY_MS = [string] $OctopusParameters['AcceptanceTests.InputDelayMs']
 
     function Get-TrxSummary {
         # Counts and the parallelism the run reached: the sum of test durations over the wall time of the tests.
@@ -140,3 +150,7 @@ if ($executed -eq 0) {
     Fail-Step "No acceptance test ran against $baseUrl ($scope): none matched, or every one skipped itself, and a run that tests nothing must not pass; the test data was reloaded."
 }
 Write-Highlight "Acceptance tests passed; the test data was reloaded."
+
+# Said as an exit code: Octopus ends a step with the exit code of the last program its script ran, which may be one
+# whose refusal was expected and handled (a dormant system's resources that are gone: cmdemo2, 2026-10-15).
+exit 0

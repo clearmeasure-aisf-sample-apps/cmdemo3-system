@@ -1,4 +1,4 @@
-# This system follows the demo-environment kit by pulling (principle 006): nothing is pushed into this repository.
+# This system follows the demo-platform kit by pulling (principle 006): nothing is pushed into this repository.
 # Every day this workflow compares the repository with the kit's templates and, when they differ, opens a pull
 # request here with the kit's files (branch kit-templates), or updates the one that is open. It never merges: the
 # system's owner reads the env-checks preview, merges and promotes the release to every environment, or closes the

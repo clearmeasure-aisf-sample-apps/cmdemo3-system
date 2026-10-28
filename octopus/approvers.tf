@@ -72,26 +72,32 @@ resource "octopusdeploy_scoped_user_role" "approvers" {
 
 # The pipeline's own sign-off (decision 0048): a deployable with "pipelineSignOff": true in system.json may also be
 # signed off by the system's service account <slug>-github, which a workflow of the system repository then answers
-# with a reason naming its run. The team "<slug> pipeline sign-off" holds that account alone and is a second
+# with a reason naming its run. The team "<slug> pipeline sign-off" holds that account (and the accounts of
+# system.pipelineSignOffMembers, below) alone and is a second
 # responsible team of those deployables' Sign-off only; every other Sign-off stays the approvers' alone. Its role is
 # Project viewer, as the approvers', in those deployables' projects only. The team exists only while a deployable
 # asks for it; octopus.approvers itself never names the service account (scripts/test-system.ps1).
 
+# Further members (decision 0057): system.json system.pipelineSignOffMembers names Octopus service accounts by username
+# (for example an agent that promotes releases once its own gate passes). They join the team while a deployable asks
+# for it, with the same role in the same projects; the system's owner records each as a variance in the registry.
+
 locals {
-  pipeline_sign_off = toset([for d in local.system.deployables : d.name if try(d.pipelineSignOff, false) == true])
+  pipeline_sign_off = toset([for name, d in local.deployables : name if try(d.pipelineSignOff, false) == true])
   pipeline_login    = "${local.slug}-github"
+  pipeline_logins   = distinct(concat([local.pipeline_login], [for m in try(local.system.system.pipelineSignOffMembers, []) : lower(m)]))
 }
 
 data "octopusdeploy_users" "pipeline" {
-  count = length(local.pipeline_sign_off) > 0 ? 1 : 0
+  for_each = length(local.pipeline_sign_off) > 0 ? toset(local.pipeline_logins) : toset([])
 
-  filter = local.pipeline_login
+  filter = each.key
   take   = 100
 
   lifecycle {
     postcondition {
-      condition     = length([for u in self.users : u.id if lower(u.username) == local.pipeline_login]) == 1
-      error_message = "No single Octopus user has the username '${local.pipeline_login}', the system's service account that a deployable with pipelineSignOff lets sign off."
+      condition     = length([for u in self.users : u.id if lower(u.username) == each.key]) == 1
+      error_message = "No single Octopus user has the username '${each.key}', an account that a deployable with pipelineSignOff lets sign off (the system's service account ${local.pipeline_login}, or an entry of system.json system.pipelineSignOffMembers)."
     }
   }
 }
@@ -100,9 +106,11 @@ resource "octopusdeploy_team" "pipeline_sign_off" {
   count = length(local.pipeline_sign_off) > 0 ? 1 : 0
 
   name        = "${local.slug} pipeline sign-off"
-  description = "Signs off the promotions of ${join(", ", sort(tolist(local.pipeline_sign_off)))} (step Sign-off) as the pipeline, with a reason naming the workflow run: system.json deployables[].pipelineSignOff, decision 0048. Its only member is ${local.pipeline_login}. Managed by octopus/ of ${local.repository}."
+  description = "Signs off the promotions of ${join(", ", sort(tolist(local.pipeline_sign_off)))} (step Sign-off) as the pipeline, with a reason naming the workflow run: system.json deployables[].pipelineSignOff, decision 0048. Its members are ${join(", ", local.pipeline_logins)}: ${local.pipeline_login} and the accounts of system.json system.pipelineSignOffMembers (decision 0057). Managed by octopus/ of ${local.repository}."
   space_id    = local.system.octopus.spaceId
-  users       = [one([for u in data.octopusdeploy_users.pipeline[0].users : u.id if lower(u.username) == local.pipeline_login])]
+  users = [
+    for login in local.pipeline_logins : one([for u in data.octopusdeploy_users.pipeline[login].users : u.id if lower(u.username) == login])
+  ]
 }
 
 resource "octopusdeploy_scoped_user_role" "pipeline_sign_off" {
