@@ -1,0 +1,36 @@
+{
+  "generated": "2026-10-31T16:23:49Z",
+  "name": "aks-cmdemo3",
+  "resourceGroup": "rg-cmdemo3-cluster",
+  "location": "southcentralus",
+  "availability": {
+    "state": "Unknown",
+    "summary": "We've temporarily lost connection to the health metrics of this AKS cluster.  This does not mean your cluster is having problems; it means Resource Health Check failed to collect the health metrics from AKS. The status of the resource will change to Available after the connection is re-established.",
+    "reason": null,
+    "occurredAt": "2026-10-31T16:23:47Z"
+  },
+  "powerState": "Stopped",
+  "provisioningState": "Succeeded",
+  "kubernetesVersion": "1.35.7",
+  "tier": "Free",
+  "pools": [
+    {
+      "name": "system",
+      "mode": "System",
+      "count": 1,
+      "size": "Standard_D4as_v6",
+      "osDiskGb": 128,
+      "powerState": "Stopped",
+      "provisioningState": "Succeeded",
+      "kubernetesVersion": "1.35.7"
+    }
+  ],
+  "metrics": {
+    "windowMinutes": 15,
+    "nodeCpuPercent": null,
+    "nodeMemoryPercent": null,
+    "nodeDiskPercent": null,
+    "apiServerCpuPercent": null,
+    "apiServerMemoryPercent": null
+  }
+}
