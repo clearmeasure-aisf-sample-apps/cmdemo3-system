@@ -1,0 +1,68 @@
+{
+  "generated": "2026-10-31T08:41:39Z",
+  "currency": "USD",
+  "asOf": "2026-10-30",
+  "system": {
+    "yesterday": 1.1,
+    "last7Days": 7.72,
+    "monthToDate": 68.32
+  },
+  "environments": [
+    {
+      "name": "tdd",
+      "yesterday": 0.0,
+      "last7Days": 0.0,
+      "monthToDate": 1.35,
+      "topServices": [
+        {
+          "name": "Log Analytics",
+          "monthToDate": 1.36
+        }
+      ]
+    },
+    {
+      "name": "uat",
+      "yesterday": 0.0,
+      "last7Days": 0.0,
+      "monthToDate": 1.24,
+      "topServices": [
+        {
+          "name": "Log Analytics",
+          "monthToDate": 1.24
+        }
+      ]
+    },
+    {
+      "name": "prod",
+      "yesterday": 0.0,
+      "last7Days": 0.0,
+      "monthToDate": 1.25,
+      "topServices": [
+        {
+          "name": "Log Analytics",
+          "monthToDate": 1.25
+        }
+      ]
+    },
+    {
+      "name": "shared",
+      "yesterday": 1.1,
+      "last7Days": 7.72,
+      "monthToDate": 64.48,
+      "topServices": [
+        {
+          "name": "Virtual Machines",
+          "monthToDate": 31.75
+        },
+        {
+          "name": "Load Balancer",
+          "monthToDate": 15.97
+        },
+        {
+          "name": "Virtual Network",
+          "monthToDate": 6.26
+        }
+      ]
+    }
+  ]
+}
