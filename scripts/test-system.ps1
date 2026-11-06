@@ -93,6 +93,20 @@ Test-Rule 'deployables present' ($deployableNames.Count -gt 0)
 # Not in this runtime: the keys of a container-app deployable in the other runtime (its own environments, an always-on
 # replica, settings and secrets from a Key Vault). Here every deployable runs in every namespace from the templates of
 # gitops/, and no template reads these keys: a deployable that carried them would silently run without them.
+# system.pipelineSignOffMembers (decision 0057): Octopus usernames of further service accounts that join the team
+# "<slug> pipeline sign-off" (octopus/approvers.tf), while a deployable has pipelineSignOff. A person signs off through
+# octopus.approvers; the system's own <slug>-github is a member already.
+if ($system.system.ContainsKey('pipelineSignOffMembers')) {
+    $members = $system.system.pipelineSignOffMembers
+    $valid = $members -is [array] -and $members.Count -ge 1 -and $members.Count -le 10 -and @($members | Where-Object { $_ -isnot [string] -or $_ -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$' }).Count -eq 0
+    Test-Rule 'system.pipelineSignOffMembers' $valid 'a list of 1 to 10 Octopus usernames of service accounts (letters, digits, . _ -)'
+    if ($valid) {
+        $names = @($members | ForEach-Object { $_.ToLowerInvariant() })
+        Test-Rule 'system.pipelineSignOffMembers each once, without the system''s own account' (@($names | Select-Object -Unique).Count -eq $names.Count -and $names -notcontains "$slug-github") "an account appears twice, or is $slug-github, which is a member of the team already"
+        Test-Rule 'system.pipelineSignOffMembers not among octopus.approvers' (@($names | Where-Object { @($system.octopus['approvers']) -contains $_ }).Count -eq 0) 'an account of the pipeline team is not also an approver of every project'
+        Test-Rule 'system.pipelineSignOffMembers with a deployable that has pipelineSignOff' (@($system.deployables | Where-Object { $_ -is [Collections.IDictionary] -and $_['pipelineSignOff'] -eq $true }).Count -gt 0) 'the team exists only while a deployable asks for pipelineSignOff'
+    }
+}
 foreach ($deployable in @($system.deployables)) {
     # One exception: "environments" on a dashboard outside the cluster (hosting "staticwebapp") names the environments
     # its site exists in, and infra/cluster.bicep and the site's steps read it (checked below).

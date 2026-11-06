@@ -54,7 +54,7 @@ the AKS service to branch `cluster-status` several times an hour, and after ever
 ## Capability checks
 
 `scripts/test-capabilities.ps1` proves, read-only, every capability this system claims (one check per `CAP-NNN` of the
-demo-environment kit's `docs/capabilities.md`, section "Runtime aks-argocd"). Workflow `capabilities` runs it at the
+demo-platform kit's `docs/capabilities.md`, section "Runtime aks-argocd"). Workflow `capabilities` runs it at the
 end of every `system` build and every night, as the system's own identities, and keeps an issue labelled `capability`
 open while a check fails. The checks do not enter the cluster: they read Git, Octopus (the Argo CD instance's health,
 the deployments and their logs), Azure as a reader, and the answers of the apps. Checks of this system's own go in

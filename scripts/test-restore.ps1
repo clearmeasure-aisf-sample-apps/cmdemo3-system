@@ -48,3 +48,7 @@ if (-not $tables -or -not $source) {
     Fail-Step "Job $job succeeded but did not report what it restored."
 }
 Write-Highlight "Restore test of ${environmentName}: $($tables -replace '^db-restore-test: ', ''). $($source -replace '^db-restore-test: ', '')."
+
+# Said as an exit code: Octopus ends a step with the exit code of the last program its script ran, which may be one
+# whose refusal was expected and handled (a dormant system's resources that are gone: cmdemo2, 2026-10-15).
+exit 0
