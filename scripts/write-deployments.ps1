@@ -9,7 +9,7 @@
 .DESCRIPTION
     The system reads Octopus, once, for everything that is deployed from its space; no application reads it for
     itself. The file is what every dashboard shows a marker from: the system's own health dashboard on the node that
-    is being deployed, and the fleet health dashboard on the system's box.
+    is being deployed, and the platform health dashboard on the system's box.
 
     One entry per deployment task of the space that is not finished, or finished less than -FinishedMinutes ago:
 
@@ -34,7 +34,7 @@
     In flight first, the one that started first at the top; then what ended, the last one first. An empty list says
     that nothing is being deployed.
 
-    Beside the list, in the names and words of the fleet's "activity" (docs/fleet.md of the kit):
+    Beside the list, in the names and words of the platform's "activity" (docs/fleet.md of the kit):
 
       recent[]     the last deployment that ended of each project in each environment, the last one first: project,
                    release, environment, result (succeeded, failed, canceled), finished, startedBy, url. It stays
@@ -71,7 +71,7 @@
     The folder that holds system.json, which names the system, the Octopus server and the space.
 
 .PARAMETER System
-    For a system without a system.json: its name in the fleet. With -OctopusUrl and -Space.
+    For a system without a system.json: its name in the platform. With -OctopusUrl and -Space.
 
 .PARAMETER OctopusUrl
     For a system without a system.json: the Octopus server.

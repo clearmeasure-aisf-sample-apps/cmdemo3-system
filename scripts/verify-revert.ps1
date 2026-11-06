@@ -105,3 +105,7 @@ while ($true) {
     Start-Sleep -Seconds 10
 }
 Write-Highlight "After the revert, $name of $environmentName is in service: $url answers 200 (image tag $tag, every replica available)."
+
+# Said as an exit code: Octopus ends a step with the exit code of the last program its script ran, which may be one
+# whose refusal was expected and handled (a dormant system's resources that are gone: cmdemo2, 2026-10-15).
+exit 0

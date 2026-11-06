@@ -1253,3 +1253,7 @@ Write-Highlight "Content of $name in ${environmentName}: $($files.Count) file(s)
 # Argo CD applies the commit within a minute, and the kubelet then refreshes the mounted files (about a minute more).
 Wait-Topology -Minutes 8 -Hint "Argo CD applies $path, and the site's pod reads it from ConfigMap $name-content."
 Write-Highlight "$url shows $(@($topology.environments).Count) environment(s) and $nodeCount node(s), with a runtime diagram of each environment."
+
+# Said as an exit code: Octopus ends a step with the exit code of the last program its script ran, which may be one
+# whose refusal was expected and handled (a dormant system's resources that are gone: cmdemo2, 2026-10-15).
+exit 0

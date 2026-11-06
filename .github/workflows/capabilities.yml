@@ -1,5 +1,5 @@
 # Nightly capability checks: scripts/test-capabilities.ps1 proves, read-only, every capability this system claims
-# (one check per CAP-NNN of the demo-environment kit's docs/capabilities.md): rulesets, pins, Octopus processes,
+# (one check per CAP-NNN of the demo-platform kit's docs/capabilities.md): rulesets, pins, Octopus processes,
 # deployment stacks, image locks, roles, runbook results, clean deployment logs. It signs in as the system's own
 # identities: Azure as id-<slug>-plan (Reader), Octopus as the system's service account. The GitHub reads (this
 # repository's files, rulesets and branches, and the app repository's rulesets) are made as the system's own GitHub
@@ -178,7 +178,7 @@ jobs:
           if [ "$OUTCOME" != "success" ]; then lines=$(grep -E '^(FAIL|[0-9]+ of)' "$REPORT" || tail -n 20 "$REPORT"); fi
           echo "failed=$(printf '%s' "$lines" | base64 -w0)" >> "$GITHUB_OUTPUT"
 
-  # One issue for both jobs: the fleet reads it as its finding capability/<slug>.
+  # One issue for both jobs: the platform reads it as its finding capability/<slug>.
   report:
     needs: [capabilities, own]
     if: ${{ !cancelled() }}

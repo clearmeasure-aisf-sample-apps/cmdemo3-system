@@ -14,9 +14,9 @@ variable "github_token" {
 }
 
 variable "test_runner_image" {
-  description = "Execution container of the acceptance-test steps (on mcr.microsoft.com): Chromium, pwsh and .NET 8; the step adds .NET 10. Match the Playwright version of the app's AcceptanceTests project."
+  description = "Execution container of the acceptance-test steps (on mcr.microsoft.com): Chromium, pwsh and .NET; the step adds .NET 10. Match the Playwright version of the app's AcceptanceTests project."
   type        = string
-  default     = "playwright/dotnet:v1.54.0-noble"
+  default     = "playwright/dotnet:v1.61.0-noble"
 }
 
 variable "worker_tools_image" {

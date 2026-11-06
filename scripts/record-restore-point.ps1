@@ -54,3 +54,7 @@ if (-not $backup) {
 Set-OctopusVariable -name 'RestorePoint' -value $backup
 Write-Highlight "Restore point before ${release}: $backup"
 Write-Host "To return the data to it: RESTORE DATABASE [$database] FROM URL = N'$backup' WITH REPLACE, on SQL Server of $namespace (service db), with a credential for the storage container as the backup job creates it (gitops/templates/environment/backup.yaml)."
+
+# Said as an exit code: Octopus ends a step with the exit code of the last program its script ran, which may be one
+# whose refusal was expected and handled (a dormant system's resources that are gone: cmdemo2, 2026-10-15).
+exit 0

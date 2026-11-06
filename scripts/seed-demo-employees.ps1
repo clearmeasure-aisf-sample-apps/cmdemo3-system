@@ -89,3 +89,7 @@ if ($exitCode -ne 0 -or [int] $counters.total -ne 1 -or [int] $counters.passed -
 $output = $trx.SelectSingleNode("//*[local-name()='UnitTestResult']/*[local-name()='Output']/*[local-name()='StdOut']")
 $summary = if ($output) { $output.InnerText.Trim() } else { 'Demo employees: the seeder passed and printed no counts.' }
 Write-Highlight ($summary -replace '^Demo employees:', "Demo employees in ${environmentName}:")
+
+# Said as an exit code: Octopus ends a step with the exit code of the last program its script ran, which may be one
+# whose refusal was expected and handled (a dormant system's resources that are gone: cmdemo2, 2026-10-15).
+exit 0

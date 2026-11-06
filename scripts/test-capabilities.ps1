@@ -135,6 +135,37 @@ function Find-LastDeployment([string] $Slug, [string] $Environment) {
     $deployment | Add-Member -NotePropertyName Log -NotePropertyValue (Invoke-Octopus "/api/tasks/$($deployment.TaskId)/raw") -PassThru |
         Add-Member -NotePropertyName Version -NotePropertyValue (Invoke-Octopus "/api/$space/releases/$($deployment.ReleaseId)").Version -PassThru
 }
+function Get-SuccessfulVersion([string] $ProjectId, [string] $EnvironmentId, [int] $Days = 30) {
+    # The versions of the releases a project deployed successfully to an environment in the last $Days days, newest
+    # deployment first (the rollback check reads the order). A fixed count of deployments is no window: a factory that
+    # deploys to the first environment dozens of times a day pushes a rollback out of the last 30 within hours. The
+    # successful Deploy tasks of the project and environment come from the task list's own filters (GET /tasks:
+    # project, environment, states, fromCompletedDate; the instance's llms.txt), the deployments from the deployment
+    # list, which has no state or date filter and is read until it reaches the start of the window.
+    $since = [datetime]::UtcNow.AddDays(-$Days)
+    $succeeded = [Collections.Generic.HashSet[string]]::new()
+    for ($skip = 0; $skip -lt 5000; $skip += 100) {
+        $page = Invoke-Octopus "/api/$space/tasks?name=Deploy&project=$ProjectId&environment=$EnvironmentId&states=Success&fromCompletedDate=$([uri]::EscapeDataString($since.ToString('yyyy-MM-ddTHH:mm:ssZ')))&skip=$skip&take=100"
+        foreach ($task in @($page.Items)) {
+            $argument = $task.PSObject.Properties['Arguments']
+            if ($argument -and $argument.Value -and $argument.Value.PSObject.Properties['DeploymentId']) { $null = $succeeded.Add([string] $argument.Value.DeploymentId) }
+        }
+        if (@($page.Items).Count -lt 100) { break }
+    }
+    $releases = @{}
+    $versions = [Collections.Generic.List[version]]::new()
+    for ($skip = 0; $skip -lt 5000; $skip += 100) {
+        $page = Invoke-Octopus "/api/$space/deployments?projects=$ProjectId&environments=$EnvironmentId&skip=$skip&take=100"
+        $items = @($page.Items)
+        foreach ($deployment in $items) {
+            if (([datetime] $deployment.Created).ToUniversalTime() -lt $since -or -not $succeeded.Contains([string] $deployment.Id)) { continue }
+            if (-not $releases.ContainsKey($deployment.ReleaseId)) { $releases[$deployment.ReleaseId] = [version] (Invoke-Octopus "/api/$space/releases/$($deployment.ReleaseId)").Version }
+            $versions.Add($releases[$deployment.ReleaseId])
+        }
+        if ($items.Count -lt 100 -or ([datetime] $items[-1].Created).ToUniversalTime() -lt $since) { break }
+    }
+    return $versions.ToArray()
+}
 function Get-LastDeployment([string] $Slug, [string] $Environment) {
     $deployment = Find-LastDeployment $Slug $Environment
     if (-not $deployment) { Skip-Check "no successful $Slug deployment in $Environment yet" }
@@ -217,7 +248,7 @@ function Get-InsightsCount([string] $Environment, [string] $Query) {
 function Get-TelemetryState {
     # Capability "telemetry" reaches an environment with its system release: the Deployment in Git then reads Secret
     # "telemetry" under the app's own name. On: the environments where Git says so. Waiting: the ones the newest
-    # system release has not reached yet; that is promotion's matter (the fleet reports a release that stays behind),
+    # system release has not reached yet; that is promotion's matter (the platform reports a release that stays behind),
     # not a capability that fails. An environment that runs the newest release without it is a failure.
     $role = "$slug-$deployable"
     $newest = [string] @((Invoke-Octopus "/api/$space/projects/$((Get-Project $systemProject).Id)/releases?take=1").Items)[0].Version
@@ -439,13 +470,12 @@ $checks = [ordered] @{
     'CAP-037' = {
         # test-rollback.ps1 redeploys the previous release and then the current one: the first environment's history
         # shows an older release deployed successfully after a newer one.
+        # The last 30 days of the environment's history, not a number of deployments (Get-SuccessfulVersion).
         $project = Get-Project $deployableProject
-        $versions = @((Invoke-Octopus "/api/$space/deployments?projects=$($project.Id)&environments=$(Get-EnvironmentId $first)&take=30").Items |
-                Where-Object { (Invoke-Octopus "/api/tasks/$($_.TaskId)").State -eq 'Success' } |
-                ForEach-Object { [version] (Invoke-Octopus "/api/$space/releases/$($_.ReleaseId)").Version })
-        if (@($versions | Select-Object -Unique).Count -lt 2) { Skip-Check "fewer than two releases deployed in $first" }
+        $versions = @(Get-SuccessfulVersion $project.Id (Get-EnvironmentId $first))
+        if (@($versions | Select-Object -Unique).Count -lt 2) { Skip-Check "fewer than two releases deployed in $first in the last 30 days" }
         $rolledBack = $false; for ($i = 0; $i -lt $versions.Count - 1; $i++) { if ($versions[$i] -lt $versions[$i + 1]) { $rolledBack = $true } }
-        Assert-That $rolledBack "no successful redeployment of an older release in $first"; "an older release was redeployed successfully in $first (test-rollback.ps1)"
+        Assert-That $rolledBack "no successful redeployment of an older release in $first in the last 30 days (test-rollback.ps1 proves it again)"; "an older release was redeployed successfully in $first in the last 30 days (test-rollback.ps1)"
     }
     'CAP-038' = {
         # The sign-off step is in the process from the start (it excludes the first environment), so a release made
