@@ -1,0 +1,270 @@
+{
+  "generated": "2026-10-18T12:48:00Z",
+  "environments": [
+    {
+      "name": "tdd",
+      "deployables": [
+        {
+          "name": "ui",
+          "version": "2.4.26",
+          "deployedAt": "2026-10-09T02:28:18Z",
+          "signedOffBy": null,
+          "reason": null,
+          "lastPersonSignOff": null,
+          "commit": "855937318847e4e99dd8ca056652b9521cf58d28",
+          "commitAt": "2026-10-06T17:24:08Z",
+          "leadTimeHours": 57.1,
+          "behindFirst": {
+            "versions": 0,
+            "days": 0
+          },
+          "deploymentsLast7Days": 0,
+          "failedLast7Days": 0,
+          "releaseUrl": "https://clearmeasure.octopus.app/app#/Spaces-357/projects/cmdemo3-ui/deployments/releases/2.4.26"
+        },
+        {
+          "name": "dashboard",
+          "version": "1.0.18",
+          "deployedAt": "2026-10-11T05:54:39Z",
+          "signedOffBy": null,
+          "reason": null,
+          "lastPersonSignOff": null,
+          "commit": "8a682c02a8192dd53e50d7c4fa8f8dafa62c4f25",
+          "commitAt": "2026-10-11T05:47:58Z",
+          "leadTimeHours": 0.1,
+          "behindFirst": {
+            "versions": 0,
+            "days": 0
+          },
+          "deploymentsLast7Days": 0,
+          "failedLast7Days": 0,
+          "releaseUrl": "https://clearmeasure.octopus.app/app#/Spaces-357/projects/cmdemo3-dashboard/deployments/releases/1.0.18"
+        },
+        {
+          "name": "status",
+          "version": "1.0.14",
+          "deployedAt": "2026-10-11T05:57:24Z",
+          "signedOffBy": null,
+          "reason": null,
+          "lastPersonSignOff": null,
+          "commit": "b1526284b91f0f5f74ebd6b8dfe0dcefc65210f7",
+          "commitAt": "2026-10-11T05:54:52Z",
+          "leadTimeHours": 0.0,
+          "behindFirst": {
+            "versions": 0,
+            "days": 0
+          },
+          "deploymentsLast7Days": 0,
+          "failedLast7Days": 0,
+          "releaseUrl": "https://clearmeasure.octopus.app/app#/Spaces-357/projects/cmdemo3-status/deployments/releases/1.0.14"
+        },
+        {
+          "name": "system",
+          "version": "1.0.55",
+          "deployedAt": "2026-10-11T05:33:45Z",
+          "signedOffBy": null,
+          "reason": null,
+          "lastPersonSignOff": null,
+          "commit": "33108d5f5d44c69ecd2bf549161d8eb8b4208bf4",
+          "commitAt": "2026-10-11T05:25:44Z",
+          "leadTimeHours": 0.1,
+          "behindFirst": {
+            "versions": 0,
+            "days": 0
+          },
+          "deploymentsLast7Days": 0,
+          "failedLast7Days": 0,
+          "releaseUrl": "https://clearmeasure.octopus.app/app#/Spaces-357/projects/cmdemo3-system/deployments/releases/1.0.55"
+        }
+      ],
+      "health": {
+        "last24Hours": {
+          "reports": 0,
+          "healthy": 0
+        },
+        "last7Days": {
+          "reports": 0,
+          "healthy": 0
+        },
+        "lastFailure": null
+      }
+    },
+    {
+      "name": "uat",
+      "deployables": [
+        {
+          "name": "ui",
+          "version": "2.4.26",
+          "deployedAt": "2026-10-11T05:18:35Z",
+          "signedOffBy": "ai-ops",
+          "reason": "2.4.26 waited in tdd for the class of 2026-10-09 and was not promoted there; the fleet reports uat and prod behind tdd (issue 76)",
+          "lastPersonSignOff": null,
+          "commit": "855937318847e4e99dd8ca056652b9521cf58d28",
+          "commitAt": "2026-10-06T17:24:08Z",
+          "leadTimeHours": 107.9,
+          "behindFirst": {
+            "versions": 0,
+            "days": 0
+          },
+          "deploymentsLast7Days": 0,
+          "failedLast7Days": 0,
+          "releaseUrl": "https://clearmeasure.octopus.app/app#/Spaces-357/projects/cmdemo3-ui/deployments/releases/2.4.26"
+        },
+        {
+          "name": "dashboard",
+          "version": "1.0.18",
+          "deployedAt": "2026-10-11T06:00:46Z",
+          "signedOffBy": "ai-ops",
+          "reason": "Dashboard template of the kit: the fleet dashboard branding and the deployment lines, as Jeffrey asked for all system dashboards",
+          "lastPersonSignOff": null,
+          "commit": "8a682c02a8192dd53e50d7c4fa8f8dafa62c4f25",
+          "commitAt": "2026-10-11T05:47:58Z",
+          "leadTimeHours": 0.2,
+          "behindFirst": {
+            "versions": 0,
+            "days": 0
+          },
+          "deploymentsLast7Days": 0,
+          "failedLast7Days": 0,
+          "releaseUrl": "https://clearmeasure.octopus.app/app#/Spaces-357/projects/cmdemo3-dashboard/deployments/releases/1.0.18"
+        },
+        {
+          "name": "status",
+          "version": "1.0.14",
+          "deployedAt": "2026-10-11T06:02:37Z",
+          "signedOffBy": "ai-ops",
+          "reason": "Dashboard template of the kit: the fleet dashboard branding and the deployment lines, as Jeffrey asked for all system dashboards",
+          "lastPersonSignOff": null,
+          "commit": "b1526284b91f0f5f74ebd6b8dfe0dcefc65210f7",
+          "commitAt": "2026-10-11T05:54:52Z",
+          "leadTimeHours": 0.1,
+          "behindFirst": {
+            "versions": 0,
+            "days": 0
+          },
+          "deploymentsLast7Days": 0,
+          "failedLast7Days": 0,
+          "releaseUrl": "https://clearmeasure.octopus.app/app#/Spaces-357/projects/cmdemo3-status/deployments/releases/1.0.14"
+        },
+        {
+          "name": "system",
+          "version": "1.0.55",
+          "deployedAt": "2026-10-11T05:37:52Z",
+          "signedOffBy": "ai-ops",
+          "reason": "Kit templates (pull request 74): the deployment lines of the dashboards, and scripts that end with their own exit code",
+          "lastPersonSignOff": null,
+          "commit": "33108d5f5d44c69ecd2bf549161d8eb8b4208bf4",
+          "commitAt": "2026-10-11T05:25:44Z",
+          "leadTimeHours": 0.2,
+          "behindFirst": {
+            "versions": 0,
+            "days": 0
+          },
+          "deploymentsLast7Days": 0,
+          "failedLast7Days": 0,
+          "releaseUrl": "https://clearmeasure.octopus.app/app#/Spaces-357/projects/cmdemo3-system/deployments/releases/1.0.55"
+        }
+      ],
+      "health": {
+        "last24Hours": {
+          "reports": 0,
+          "healthy": 0
+        },
+        "last7Days": {
+          "reports": 0,
+          "healthy": 0
+        },
+        "lastFailure": null
+      }
+    },
+    {
+      "name": "prod",
+      "deployables": [
+        {
+          "name": "ui",
+          "version": "2.4.26",
+          "deployedAt": "2026-10-11T05:21:41Z",
+          "signedOffBy": "ai-ops",
+          "reason": "2.4.26 waited in tdd for the class of 2026-10-09 and was not promoted there; the fleet reports uat and prod behind tdd (issue 76)",
+          "lastPersonSignOff": null,
+          "commit": "855937318847e4e99dd8ca056652b9521cf58d28",
+          "commitAt": "2026-10-06T17:24:08Z",
+          "leadTimeHours": 108.0,
+          "behindFirst": {
+            "versions": 0,
+            "days": 0
+          },
+          "deploymentsLast7Days": 0,
+          "failedLast7Days": 0,
+          "releaseUrl": "https://clearmeasure.octopus.app/app#/Spaces-357/projects/cmdemo3-ui/deployments/releases/2.4.26"
+        },
+        {
+          "name": "dashboard",
+          "version": "1.0.18",
+          "deployedAt": "2026-10-11T06:05:20Z",
+          "signedOffBy": "ai-ops",
+          "reason": "Dashboard template of the kit: the fleet dashboard branding and the deployment lines, as Jeffrey asked for all system dashboards",
+          "lastPersonSignOff": null,
+          "commit": "8a682c02a8192dd53e50d7c4fa8f8dafa62c4f25",
+          "commitAt": "2026-10-11T05:47:58Z",
+          "leadTimeHours": 0.3,
+          "behindFirst": {
+            "versions": 0,
+            "days": 0
+          },
+          "deploymentsLast7Days": 0,
+          "failedLast7Days": 0,
+          "releaseUrl": "https://clearmeasure.octopus.app/app#/Spaces-357/projects/cmdemo3-dashboard/deployments/releases/1.0.18"
+        },
+        {
+          "name": "status",
+          "version": "1.0.14",
+          "deployedAt": "2026-10-11T06:09:16Z",
+          "signedOffBy": "ai-ops",
+          "reason": "Dashboard template of the kit: the fleet dashboard branding and the deployment lines, as Jeffrey asked for all system dashboards",
+          "lastPersonSignOff": null,
+          "commit": "b1526284b91f0f5f74ebd6b8dfe0dcefc65210f7",
+          "commitAt": "2026-10-11T05:54:52Z",
+          "leadTimeHours": 0.2,
+          "behindFirst": {
+            "versions": 0,
+            "days": 0
+          },
+          "deploymentsLast7Days": 0,
+          "failedLast7Days": 0,
+          "releaseUrl": "https://clearmeasure.octopus.app/app#/Spaces-357/projects/cmdemo3-status/deployments/releases/1.0.14"
+        },
+        {
+          "name": "system",
+          "version": "1.0.55",
+          "deployedAt": "2026-10-11T05:41:50Z",
+          "signedOffBy": "ai-ops",
+          "reason": "Kit templates (pull request 74): the deployment lines of the dashboards, and scripts that end with their own exit code",
+          "lastPersonSignOff": null,
+          "commit": "33108d5f5d44c69ecd2bf549161d8eb8b4208bf4",
+          "commitAt": "2026-10-11T05:25:44Z",
+          "leadTimeHours": 0.3,
+          "behindFirst": {
+            "versions": 0,
+            "days": 0
+          },
+          "deploymentsLast7Days": 0,
+          "failedLast7Days": 0,
+          "releaseUrl": "https://clearmeasure.octopus.app/app#/Spaces-357/projects/cmdemo3-system/deployments/releases/1.0.55"
+        }
+      ],
+      "health": {
+        "last24Hours": {
+          "reports": 0,
+          "healthy": 0
+        },
+        "last7Days": {
+          "reports": 0,
+          "healthy": 0
+        },
+        "lastFailure": null
+      }
+    }
+  ],
+  "failover": null
+}
