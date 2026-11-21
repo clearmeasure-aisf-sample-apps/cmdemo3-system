@@ -1,0 +1,53 @@
+{
+  "generated": "2026-11-21T08:41:25Z",
+  "currency": "USD",
+  "asOf": "2026-11-20",
+  "system": {
+    "yesterday": 1.11,
+    "last7Days": 7.75,
+    "monthToDate": 22.13
+  },
+  "environments": [
+    {
+      "name": "tdd",
+      "yesterday": 0.0,
+      "last7Days": 0.0,
+      "monthToDate": 0.0,
+      "topServices": []
+    },
+    {
+      "name": "uat",
+      "yesterday": 0.0,
+      "last7Days": 0.0,
+      "monthToDate": 0.0,
+      "topServices": []
+    },
+    {
+      "name": "prod",
+      "yesterday": 0.0,
+      "last7Days": 0.0,
+      "monthToDate": 0.0,
+      "topServices": []
+    },
+    {
+      "name": "shared",
+      "yesterday": 1.11,
+      "last7Days": 7.75,
+      "monthToDate": 22.13,
+      "topServices": [
+        {
+          "name": "Load Balancer",
+          "monthToDate": 12.0
+        },
+        {
+          "name": "Virtual Network",
+          "monthToDate": 4.8
+        },
+        {
+          "name": "Container Registry",
+          "monthToDate": 3.33
+        }
+      ]
+    }
+  ]
+}
